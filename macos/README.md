@@ -1,7 +1,7 @@
 # macOS bootstrap
 
-A reproducible snapshot of this Mac's development environment, and a script that
-replays it onto a fresh machine.
+A reproducible snapshot of a macOS development environment, and a script that
+replays it onto a fresh machine — any Mac, not just the one it was taken from.
 
 ```sh
 git clone <this repo> ~/development/machines-setups
@@ -42,10 +42,17 @@ excluded by the repo-root `.gitignore`. `.zshrc` reads `LINEAR_API_KEY` from the
 login keychain; the `dotfiles` layer prints the `security add-generic-password`
 command rather than storing a value. `gh auth login` stays manual.
 
-**The `.zshrc` here is not byte-identical to the original.** One line was
-dropped: a trailing `eval "$(brew shellenv)"` that duplicated `.zprofile` and
-contradicted the comment at the top of the same file saying brew env lives in
-`.zprofile`. Nothing else changed.
+**The `.zshrc` here is not byte-identical to the original.** Four deliberate
+changes, and nothing else:
+
+| Change | Why |
+| --- | --- |
+| Dropped a trailing `eval "$(brew shellenv)"` | Duplicated `.zprofile`, and contradicted the comment at the top of the same file saying brew env lives there |
+| `fpath=(/Users/shaia/...)` → `$HOME/...` | The literal path is correct on exactly one machine |
+| Removed `GOPRIVATE` for a private org | Employer-specific; moved to `~/.zshrc.local` |
+| Added `[[ -r ~/.zshrc.local ]] && source` | The escape hatch the previous two rows depend on |
+
+The last three exist to keep this file portable; see the two rows below.
 
 **One git identity, not three.** `.gitconfig` carries the personal identity
 outright. An earlier version split it three ways — a work identity at the top
