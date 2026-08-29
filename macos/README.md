@@ -17,7 +17,7 @@ Preflight always runs (Xcode Command Line Tools, Homebrew), then five layers:
 | --- | --- |
 | `brew` | `Brewfile` — 51 formulae, 34 casks, via `brew bundle --no-upgrade` |
 | `zsh` | oh-my-zsh, the powerlevel10k theme symlink, `~/.docker/completions`, login shell |
-| `dotfiles` | Backs up then symlinks `.zshrc`, `.zprofile`, `.p10k.zsh`, both gitconfigs, `~/.config/git/ignore` |
+| `dotfiles` | Backs up then symlinks `.zshrc`, `.zprofile`, `.p10k.zsh`, `.gitconfig`, `~/.config/git/ignore` |
 | `tooling` | `gopls`, `dlv`, `mcp-language-server`, the Claude Code CLI, the four `~/.claude` symlinks |
 | `extensions` | ~93 VS Code and ~76 Cursor extensions |
 
@@ -46,6 +46,14 @@ command rather than storing a value. `gh auth login` stays manual.
 dropped: a trailing `eval "$(brew shellenv)"` that duplicated `.zprofile` and
 contradicted the comment at the top of the same file saying brew env lives in
 `.zprofile`. Nothing else changed.
+
+**One git identity, not three.** `.gitconfig` carries the personal identity
+outright. An earlier version split it three ways — a work identity at the top
+level, overridden back to personal for `~/development/` by an `includeIf`. Once
+the work identity moved out of the repo the top level became personal, which
+left that include swapping nothing but a display name, so both it and
+`gitconfig-development` are gone. The `~/work/` include stays, because it still
+switches something real.
 
 **Machine-specific config is deliberately absent.** This snapshot is meant to
 work on any Mac, so anything true of only one machine or one employer lives in

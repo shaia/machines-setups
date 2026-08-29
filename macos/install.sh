@@ -272,7 +272,6 @@ layer_dotfiles() {
   backup_then_link "$d/zprofile"              "$HOME/.zprofile"
   backup_then_link "$d/p10k.zsh"              "$HOME/.p10k.zsh"
   backup_then_link "$d/gitconfig"             "$HOME/.gitconfig"
-  backup_then_link "$d/gitconfig-development" "$HOME/.gitconfig-development"
   backup_then_link "$d/config/git/ignore"     "$HOME/.config/git/ignore"
 
   # ~/.gitconfig-work and ~/.zshrc.local are machine-local by design: a work

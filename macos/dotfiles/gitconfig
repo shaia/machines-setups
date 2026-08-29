@@ -1,12 +1,10 @@
 [user]
-	name = Shai Asher
+	name = shaia
 	email = shaia@outlook.com
 [url "git@github.com:"]
 	insteadOf = https://github.com/
 [push]
 	autoSetupRemote = true
-[includeIf "gitdir:~/development/"]
-	path = ~/.gitconfig-development
 # ~/.gitconfig-work is deliberately machine-local and NOT in this repo: it
 # carries a work identity that does not belong in a personal, public snapshot.
 # Create it by hand on a machine that needs one. Git ignores a missing include
