@@ -1,0 +1,6 @@
+# Homebrew environment (single canonical location for brew shellenv).
+# Runs after macOS /etc/zprofile path_helper, so brew paths take precedence.
+eval "$(/opt/homebrew/bin/brew shellenv)"
+
+# Added by Obsidian
+export PATH="$PATH:/Applications/Obsidian.app/Contents/MacOS"

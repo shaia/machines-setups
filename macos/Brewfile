@@ -1,0 +1,159 @@
+# Brewfile — snapshot of this Mac's Homebrew state.
+#
+# Apply with:  brew bundle --file=Brewfile --no-upgrade
+# Check with:  brew bundle check --file=Brewfile --verbose
+# Refresh with: ./snapshot.sh   (then re-apply the comment blocks at the bottom)
+#
+# No `tap` lines: this machine uses only homebrew-core and homebrew-cask.
+
+# ---------------------------------------------------------------------------
+# Shell
+# ---------------------------------------------------------------------------
+brew "powerlevel10k"            # zsh prompt theme, symlinked into $ZSH_CUSTOM/themes
+brew "zsh-autosuggestions"      # sourced from .zshrc by absolute path
+brew "zsh-syntax-highlighting"  # sourced LAST in .zshrc
+brew "starship"                 # alternative prompt, installed but not active
+brew "thefuck"
+brew "zoxide"
+brew "fzf"
+
+# ---------------------------------------------------------------------------
+# Core CLI replacements and file tools
+# ---------------------------------------------------------------------------
+brew "bat"          # cat
+brew "eza"          # ls  -> aliased in .zshrc
+brew "fd"           # find
+brew "ripgrep"      # grep
+brew "sd"           # sed
+brew "dust"         # du
+brew "duf"          # df
+brew "procs"        # ps
+brew "btop"         # top
+brew "broot"        # tree / navigator
+brew "findutils"    # GNU find/xargs/locate as g-prefixed binaries
+brew "make"         # GNU make, newer than the Apple-shipped one
+brew "wget"
+brew "telnet"
+brew "tldr"
+brew "jq"
+brew "yq"
+brew "httpie"
+brew "gping"
+brew "hyperfine"
+
+# ---------------------------------------------------------------------------
+# Git and GitHub
+# ---------------------------------------------------------------------------
+brew "git"
+brew "git-delta"    # diff pager
+brew "git-lfs"      # .gitconfig registers its filter.lfs.* hooks
+brew "gh"           # also the credential helper in .gitconfig
+brew "lazygit"
+
+# ---------------------------------------------------------------------------
+# Languages and runtimes
+# ---------------------------------------------------------------------------
+brew "go@1.25"      # unversioned `go` is NOT installed; this formula is linked
+brew "golangci-lint"
+brew "uv"           # Python packaging
+brew "nvm"          # sourced from .zshrc; no node versions installed via nvm
+brew "corepack"     # pulls in the `node` used by /opt/homebrew/bin/node
+
+# ---------------------------------------------------------------------------
+# Cloud, containers, Kubernetes
+# ---------------------------------------------------------------------------
+brew "awscli"
+brew "kubernetes-cli"   # `kubectl`, aliased to `k` in .zshrc
+brew "kubectx"
+brew "helm"
+brew "k9s"
+brew "kind"
+brew "kops"
+brew "docker-compose"
+brew "terraform"        # frozen at 1.5.7 in homebrew-core (last MPL release)
+brew "opentofu"         # the maintained successor; both are installed here
+brew "terragrunt"
+brew "mkcert"
+brew "mongosh"
+brew "redocly-cli"
+
+# ---------------------------------------------------------------------------
+# Casks — editors and terminals
+# ---------------------------------------------------------------------------
+cask "iterm2"
+cask "warp"
+cask "visual-studio-code"
+cask "cursor"
+cask "cursor-cli"
+cask "webstorm"
+cask "rider"
+cask "sourcetree"
+cask "postman"
+
+# ---------------------------------------------------------------------------
+# Casks — infrastructure
+# ---------------------------------------------------------------------------
+cask "docker-desktop"
+cask "openlens"
+cask "mongodb-compass"
+cask "ngrok"
+cask "session-manager-plugin"
+cask "utm"
+
+# ---------------------------------------------------------------------------
+# Casks — browsers and communication
+# ---------------------------------------------------------------------------
+cask "arc"
+cask "google-chrome"
+cask "slack"
+cask "microsoft-teams"
+cask "whatsapp"
+cask "zoom"
+
+# ---------------------------------------------------------------------------
+# Casks — productivity and desktop
+# ---------------------------------------------------------------------------
+cask "alfred"
+cask "maccy"
+cask "rectangle"
+cask "rectangle-pro"
+cask "cleanshot"
+cask "obsidian"
+cask "notion"
+cask "canva"
+cask "grammarly-desktop"
+cask "microsoft-office"     # Word, Excel, PowerPoint, OneNote, Outlook
+cask "claude"
+cask "spotify"
+cask "lightburn"
+
+# ---------------------------------------------------------------------------
+# Listed above but not tracked by Homebrew
+# ---------------------------------------------------------------------------
+#
+#   alfred canva claude cleanshot google-chrome grammarly-desktop lightburn
+#   notion obsidian rectangle-pro slack utm warp whatsapp
+#
+# These 14 apps were installed by hand into /Applications before Homebrew knew
+# about them, so they do not appear in `brew list --cask` here. Two consequences:
+#
+#   * `brew bundle dump` cannot see them, so `./snapshot.sh --diff` reports each
+#     one as a removal on every run. That drift is permanent and expected — do
+#     not drop these lines when merging Brewfile.generated.
+#   * On a rebuild `install.sh` exports HOMEBREW_CASK_OPTS=--adopt, so Homebrew
+#     takes ownership of an app already at the destination instead of aborting.
+#
+# ---------------------------------------------------------------------------
+# Deliberately NOT installed
+# ---------------------------------------------------------------------------
+#
+# MDM-managed — reinstall through the corporate channel, not Homebrew:
+#   Company Portal, Microsoft Defender, OneDrive, Microsoft 365 Copilot Shim
+#
+# No cask available:
+#   Kindle — Mac App Store only. `mas` is not installed on this machine;
+#   add `brew "mas"` + `mas "Kindle", id: 302584613` if you want it automated.
+#
+# Optional. This machine runs powerlevel10k but has NO Nerd Font installed
+# anywhere, so some prompt glyphs cannot render. Uncomment on a rebuild:
+# cask "font-meslo-lg-nerd-font"

@@ -1,0 +1,31 @@
+[user]
+	name = Shai Asher
+	email = shaia@outlook.com
+[url "git@github.com:"]
+	insteadOf = https://github.com/
+[push]
+	autoSetupRemote = true
+[includeIf "gitdir:~/development/"]
+	path = ~/.gitconfig-development
+# ~/.gitconfig-work is deliberately machine-local and NOT in this repo: it
+# carries a work identity that does not belong in a personal, public snapshot.
+# Create it by hand on a machine that needs one. Git ignores a missing include
+# path silently, so on a machine without it commits just use the identity above.
+[includeIf "gitdir:~/work/"]
+	path = ~/.gitconfig-work
+[init]
+	defaultBranch = main
+[credential "https://github.com"]
+	helper = 
+	helper = !/opt/homebrew/bin/gh auth git-credential
+[credential "https://gist.github.com"]
+	helper = 
+	helper = !/opt/homebrew/bin/gh auth git-credential
+[filter "lfs"]
+	required = true
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+	process = git-lfs filter-process
+[url "git@github.com-shaia:shaia/"]
+	insteadOf = git@github.com:shaia/
+	insteadOf = https://github.com/shaia/

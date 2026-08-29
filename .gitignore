@@ -1,0 +1,25 @@
+# Secrets — never commit. The dotfiles in macos/dotfiles/ are deliberately
+# limited to files that contain no credentials.
+.ssh/
+**/gh/hosts.yml
+*.pem
+*.key
+*_rsa
+*_rsa.pub
+*_ed25519
+*_ed25519.pub
+.netrc
+**/.aws/credentials
+
+# Machine-local overrides. These live in $HOME and are deliberately outside the
+# repo: a work git identity and per-machine env (GOPRIVATE, internal registries)
+# are not portable and do not belong in a personal, public snapshot. Guarded
+# here so a stray copy cannot drag them back in.
+**/dotfiles/gitconfig-work
+**/dotfiles/*.local
+
+# snapshot.sh scratch output — merge into Brewfile, then delete
+Brewfile.generated
+
+# macOS
+.DS_Store
