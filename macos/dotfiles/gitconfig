@@ -1,29 +1,27 @@
-[user]
-	name = shaia
-	email = shaia@outlook.com
-[url "git@github.com:"]
-	insteadOf = https://github.com/
-[push]
-	autoSetupRemote = true
-# ~/.gitconfig-work is deliberately machine-local and NOT in this repo: it
-# carries a work identity that does not belong in a personal, public snapshot.
-# Create it by hand on a machine that needs one. Git ignores a missing include
-# path silently, so on a machine without it commits just use the identity above.
-[includeIf "gitdir:~/work/"]
-	path = ~/.gitconfig-work
+# Portable git preferences — correct on any Mac, tied to no person or machine.
+#
+# Identity, URL rewrites that depend on ~/.ssh/config, and anything gh or
+# git-lfs writes for itself live in the machine-local files included at the
+# bottom. Git ignores a missing include path silently, so both are optional.
+#
+# Careful: `git config --global` writes to ~/.gitconfig, which install.sh
+# symlinks to THIS file. Anything a tool adds globally lands in the repo —
+# move it into ~/.gitconfig-local and delete it here.
+
 [init]
 	defaultBranch = main
-[credential "https://github.com"]
-	helper = 
-	helper = !/opt/homebrew/bin/gh auth git-credential
-[credential "https://gist.github.com"]
-	helper = 
-	helper = !/opt/homebrew/bin/gh auth git-credential
-[filter "lfs"]
-	required = true
-	clean = git-lfs clean -- %f
-	smudge = git-lfs smudge -- %f
-	process = git-lfs filter-process
-[url "git@github.com-shaia:shaia/"]
-	insteadOf = git@github.com:shaia/
-	insteadOf = https://github.com/shaia/
+[push]
+	autoSetupRemote = true
+[url "git@github.com:"]
+	insteadOf = https://github.com/
+
+# Identity and host-alias rewrites. Absent on a fresh machine, where git then
+# refuses to commit until user.name and user.email are set — see macos/README.md.
+[include]
+	path = ~/.gitconfig-local
+
+# Work identity for repos under ~/work/. Must stay last: git applies config in
+# file order and the last value wins, so this has to follow the include above
+# to override the personal identity it sets.
+[includeIf "gitdir:~/work/"]
+	path = ~/.gitconfig-work

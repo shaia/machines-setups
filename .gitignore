@@ -15,6 +15,7 @@
 # repo: a work git identity and per-machine env (GOPRIVATE, internal registries)
 # are not portable and do not belong in a personal, public snapshot. Guarded
 # here so a stray copy cannot drag them back in.
+**/dotfiles/gitconfig-local
 **/dotfiles/gitconfig-work
 **/dotfiles/*.local
 

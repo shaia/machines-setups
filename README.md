@@ -71,9 +71,14 @@ to supply a credential, never ship one.
 This is a personal repo, and the snapshots are meant to replay onto *any* Mac —
 not one particular machine under one particular employer. So config that is true
 of only one machine stays out of it, in optional files under `$HOME` that the
-scripts detect but never manage: `~/.gitconfig-work` for a work git identity,
-`~/.zshrc.local` for per-machine environment such as `GOPRIVATE`. Both are
-gitignored by name.
+scripts detect but never manage: `~/.gitconfig-local` for git identity,
+`~/.gitconfig-work` for a work identity, `~/.zshrc.local` for per-machine
+environment such as `GOPRIVATE`. All three are gitignored by name.
+
+The tracked configs keep only what is portable. `.gitconfig`, for instance, is
+preferences alone — no identity, and none of the URL rewrites that depend on a
+`~/.ssh/config` this repo deliberately does not ship. Restoring those on a
+different machine would break `git clone` rather than help it.
 
 The rule for anything new: if it would be wrong on someone else's Mac — a
 hardcoded `/Users/<name>` path, an employer's private org, an internal registry

@@ -54,28 +54,46 @@ changes, and nothing else:
 
 The last three exist to keep this file portable; see the two rows below.
 
-**One git identity, not three.** `.gitconfig` carries the personal identity
-outright. An earlier version split it three ways — a work identity at the top
-level, overridden back to personal for `~/development/` by an `includeIf`. Once
-the work identity moved out of the repo the top level became personal, which
-left that include swapping nothing but a display name, so both it and
-`gitconfig-development` are gone. The `~/work/` include stays, because it still
-switches something real.
+**`.gitconfig` holds preferences, never identity.** It was once 29 lines; 24 of
+them had no business in a portable snapshot. What is left is `defaultBranch`,
+`autoSetupRemote`, and an https→ssh rewrite — settings that are correct on any
+Mac. Three kinds of thing moved out:
+
+- **Identity.** Personal to you, and public the moment it is committed.
+- **`gh` and `git-lfs` sections.** Both tools write their own config on any
+  machine they run on, and the `gh` helper hardcodes `/opt/homebrew`.
+- **The `github.com-shaia` URL rewrite.** This is the one that mattered: it
+  routes `github.com/shaia/*` through an SSH host alias defined only in
+  `~/.ssh/config`, which is gitignored as a secret. Restoring it on a fresh
+  machine does not merely fail to help — it makes `git clone` of your own repos
+  die with `Could not resolve hostname github.com-shaia`. A snapshot that
+  breaks git is worse than one that omits a preference.
+
+**There is a trap here.** `git config --global` writes to `~/.gitconfig`, which
+the `dotfiles` layer symlinks to the tracked file — so `gh auth setup-git` or
+`git lfs install` will silently add their sections back **into the repo**.
+Nothing prevents this; the file says so at the top, and `install.sh` says so in
+its closing manual-steps list. Move what they add into `~/.gitconfig-local`.
 
 **Machine-specific config is deliberately absent.** This snapshot is meant to
 work on any Mac, so anything true of only one machine or one employer lives in
-two optional files in `$HOME` that the repo never tracks:
+three optional files in `$HOME` that the repo never tracks:
 
 | File | Holds | If missing |
 | --- | --- | --- |
+| `~/.gitconfig-local` | Identity, the `github.com-shaia` URL rewrite, and whatever `gh`/`git-lfs` wrote. Pulled in by `.gitconfig`'s `[include]` | Git refuses to commit: `unable to auto-detect email address`. The `dotfiles` layer warns and prints the command to create one |
 | `~/.gitconfig-work` | A work git identity, pulled in by `.gitconfig`'s `includeIf "gitdir:~/work/"` | Git ignores a missing include path silently; `~/work/` repos fall back to the default identity |
 | `~/.zshrc.local` | Per-machine env — `GOPRIVATE` for a private org, internal registries, work-only `PATH` entries | `.zshrc` guards the `source` with `[[ -r ]]`, so nothing breaks |
 
+Include order in `.gitconfig` is load-bearing: git applies config in file order
+and the last value wins, so the `~/work/` include must come after the
+`~/.gitconfig-local` include to override the identity it sets.
+
 The `dotfiles` layer reports whether each is present but never creates or links
-either. Both are gitignored by name so a stray copy cannot drag them back in.
-The tradeoff is real: on a rebuild, a machine that needs a work identity needs
-that one file written by hand, and nothing will remind you except a wrong
-author on your first work commit.
+them. All three are gitignored by name so a stray copy cannot drag them back in.
+The tradeoff is real: a rebuild needs `~/.gitconfig-local` written by hand
+before the first commit, and a machine that needs a work identity needs that one
+too — with nothing to remind you except a wrong author on your first commit.
 
 **oh-my-zsh is installed with `KEEP_ZSHRC=yes`.** Without it the installer
 overwrites `.zshrc`, which on a rebuild means silently losing the file this repo

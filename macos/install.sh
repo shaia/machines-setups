@@ -274,9 +274,16 @@ layer_dotfiles() {
   backup_then_link "$d/gitconfig"             "$HOME/.gitconfig"
   backup_then_link "$d/config/git/ignore"     "$HOME/.config/git/ignore"
 
-  # ~/.gitconfig-work and ~/.zshrc.local are machine-local by design: a work
-  # identity and employer-specific env do not belong in a portable snapshot.
-  # Both are optional — git ignores a missing include, .zshrc guards its source.
+  # These three are machine-local by design: a personal identity, a work
+  # identity, and employer-specific env do not belong in a portable snapshot.
+  # All optional — git ignores a missing include, .zshrc guards its source.
+  if [[ -e "$HOME/.gitconfig-local" ]]; then
+    info "~/.gitconfig-local present (machine-local, not managed here)."
+  else
+    warn "No ~/.gitconfig-local. Git has no identity, so commits will fail with"
+    warn "  'unable to auto-detect email address'. Create it with:"
+    printf '    printf "[user]\\n\\tname = NAME\\n\\temail = EMAIL\\n" > ~/.gitconfig-local\n'
+  fi
   [[ -e "$HOME/.gitconfig-work" ]] \
     && info "~/.gitconfig-work present (machine-local, not managed here)." \
     || info "No ~/.gitconfig-work; ~/work/ repos use the default git identity."
@@ -346,10 +353,14 @@ layer_tooling() {
   fi
 
   step "Manual steps this script deliberately leaves to you"
-  printf '  gh auth login       # .gitconfig uses gh as its credential helper\n'
+  printf '  gh auth login       # writes credential.helper into ~/.gitconfig, which is\n'
+  printf '                      # a symlink into this repo — move what it adds into\n'
+  printf '                      # ~/.gitconfig-local so the tracked file stays portable\n'
   printf '  open -a Docker      # first launch provisions the kubectl context\n'
   printf '  p10k configure      # only if you do not want the checked-in .p10k.zsh\n'
-  printf '  ssh keys            # not in this repo; restore from your own backup\n'
+  printf '  ssh keys            # not in this repo; restore from your own backup.\n'
+  printf '                      # ~/.gitconfig-local rewrites github.com/shaia/* to an\n'
+  printf '                      # SSH host alias that only ~/.ssh/config defines\n'
 }
 
 # --- Layer: extensions -------------------------------------------------------
