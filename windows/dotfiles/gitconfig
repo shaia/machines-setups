@@ -1,0 +1,31 @@
+# Portable git preferences — correct on any Windows machine, tied to no person
+# or employer.
+#
+# Identity, the gh credential helper, and the employer-specific includeIf rules
+# live in the machine-local files included at the bottom. Git ignores a missing
+# include path silently, so both are optional. The LFS filter is not here either:
+# Git for Windows already sets it in its system-level gitconfig.
+#
+# Careful: `git config --global` writes to ~\.gitconfig, which install.ps1
+# symlinks to THIS file. Anything a tool adds globally (gh auth setup-git,
+# git lfs install) lands in the repo — move it into ~\.gitconfig-local.
+
+[push]
+	autoSetupRemote = true
+[core]
+	# Global hook dispatcher; the directory is a junction into this repo's
+	# dotfiles\git-global-hooks. Git expands ~ here.
+	hooksPath = ~/.git-global-hooks
+
+# Identity, credential helper, and any hasconfig:remote.*.url rules that name a
+# private org. Absent on a fresh machine, where git then refuses to commit until
+# user.name and user.email are set — see windows/README.md.
+[include]
+	path = ~/.gitconfig-local
+
+# Work identity for repos under ~\development\work\. Must stay last: git applies
+# config in file order and the last value wins, so this has to follow the
+# include above to override the personal identity it sets. /i: case-insensitive
+# path match, since Windows paths are.
+[includeIf "gitdir/i:~/development/work/"]
+	path = ~/.gitconfig-work

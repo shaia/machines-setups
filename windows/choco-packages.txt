@@ -1,0 +1,18 @@
+# Chocolatey packages - snapshot of this machine. install.ps1 runs
+#   choco install <name> -y
+# from an elevated shell for every name `choco list` does not report; the
+# layer is skipped, with a notice, when the shell is not elevated.
+# Refresh with .\snapshot.ps1 (new names land under an Unsorted header at the bottom).
+#
+# Every build tool here also exists as a winget package, and three are installed
+# twice: cmake (Kitware.CMake, same C:\Program Files\CMake target), llvm
+# (LLVM.LLVM) and golangci-lint (also a go install in tools.txt). Kept because
+# that is what the machine has; consolidating onto winget is a separate decision.
+
+chocolatey          # choco lists itself; harmless, keeps snapshot.ps1 quiet
+bazelisk
+cmake               # meta package that pulls cmake.install
+cmake.install
+golangci-lint
+llvm
+make                # GNU make 4.4; the only make on PATH outside a VS developer shell

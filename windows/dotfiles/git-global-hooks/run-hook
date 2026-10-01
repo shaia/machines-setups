@@ -1,0 +1,37 @@
+#!/bin/sh
+# Global git hook dispatcher (pointed at by core.hooksPath).
+# First arg is the hook name; the rest are that hook's own arguments.
+#
+# Purpose: reject commit messages whose subject is nothing but an email
+# address, and otherwise stay out of the way by forwarding to any repo-local
+# hook of the same name so per-project hooks keep working.
+hook="$1"
+shift
+
+if [ "$hook" = "commit-msg" ]; then
+    msgfile="$1"
+    # first line that isn't blank or a comment
+    subject="$(grep -m1 -vE '^[[:space:]]*(#|$)' "$msgfile" 2>/dev/null)"
+    if printf '%s' "$subject" | grep -qiE '^[[:space:]]*[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}[[:space:]]*$'; then
+        echo "[global commit-msg hook] Refusing this commit:" >&2
+        echo "    the message is just an email address -> \"$subject\"" >&2
+        echo "    Write a short, descriptive message of what changed instead." >&2
+        exit 1
+    fi
+fi
+
+# Forward to a repo-local hook of the same name, if present and executable, so
+# setting core.hooksPath globally doesn't silently disable project hooks.
+# Resolve the real .git dir directly: `git rev-parse --git-path hooks/X` would
+# honor core.hooksPath and point back at this dispatcher (infinite loop).
+gitdir="$(git rev-parse --git-dir 2>/dev/null)"
+if [ -n "$gitdir" ]; then
+    local_hook="$gitdir/hooks/$hook"
+    if [ -x "$local_hook" ] && [ "$local_hook" -ef "$0" ] 2>/dev/null; then
+        local_hook=""   # would be us; don't recurse
+    fi
+    if [ -n "$local_hook" ] && [ -x "$local_hook" ]; then
+        exec "$local_hook" "$@"
+    fi
+fi
+exit 0

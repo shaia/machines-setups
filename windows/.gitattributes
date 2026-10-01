@@ -1,0 +1,8 @@
+# Files that Git Bash or git's own sh will execute or source must stay LF.
+# Git for Windows checks out text files with CRLF (core.autocrlf=true, set by
+# its installer), and a CR at the end of a line is a syntax error to sh.
+# Everything else here is read by PowerShell, git, starship or Windows
+# Terminal, all of which accept either ending.
+dotfiles/bashrc              text eol=lf
+dotfiles/profile             text eol=lf
+dotfiles/git-global-hooks/*  text eol=lf

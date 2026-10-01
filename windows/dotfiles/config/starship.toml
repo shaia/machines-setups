@@ -1,0 +1,248 @@
+#              Starship prompt - two-line powerline
+#
+# Every segment is a self-contained "pill" wrapped in a conditional group `( ... )`,
+# so a segment that has nothing to say renders *nothing* - no empty coloured slivers
+# when you are outside a git repo or a project has no toolchain.
+#
+# IMPORTANT: every glyph is a TOML \u escape inside a BASIC (double-quoted) string,
+# never a literal character. Literal private-use-area glyphs get silently stripped by
+# some editors and tools, which leaves `[](fg:peach)` with empty pill caps and every
+# `symbol` blank - the prompt then renders as bare coloured blocks with odd gaps.
+# Escapes survive any round-trip. TOML *literal* strings (single quotes) do NOT
+# process \u, so these must stay double-quoted.
+#
+# Colour language:
+#   peach    where you are
+#   green    branch, working tree CLEAN
+#   yellow   branch, working tree DIRTY  (tracked changes vs HEAD)
+#   lavender git counts - informational, not a warning
+#   maroon   git operation in progress (REBASING / MERGING / ...)
+#   sapphire toolchains        blue python        teal conda
+#   red      non-zero exit status
+#
+# Requires a Nerd Font installed MACHINE-WIDE (HKLM). Per-user font installs are
+# invisible to Windows Terminal (MSIX-packaged) and to VS Code (Chromium).
+# Docs: https://starship.rs/config/
+
+"$schema" = 'https://starship.rs/config-schema.json'
+
+add_newline = true
+palette = 'catppuccin_mocha'
+
+format = """
+[\u256D\u2500](overlay0)\
+$directory\
+${custom.git_clean}\
+${custom.git_dirty}\
+$git_state\
+$git_status\
+$c\
+$python\
+$conda\
+$nodejs\
+$rust\
+$golang\
+$dotnet\
+$cmd_duration\
+$status\
+$line_break\
+[\u2570\u2500](overlay0)$character"""
+
+# -- directory ---------------------------------------------------------------
+# truncate_to_repo + an empty truncation_symbol means: inside a repo you see the
+# repo name and the path within it ("rush-hour-photo-solver\python"), with no
+# leading parent directories and no leading ellipsis.
+[directory]
+style = "fg:crust bg:peach"
+read_only_style = "fg:red bg:peach"
+format = "[\uE0B6](fg:peach)[ $path$read_only ]($style)[\uE0B4](fg:peach) "
+truncation_length = 3
+truncate_to_repo = true
+truncation_symbol = ""
+home_symbol = "~"
+read_only = " \uF023"
+
+[directory.substitutions]
+"development" = "dev"
+"Documents" = "docs"
+"Downloads" = "dl"
+"OneDrive" = "\uF0C2"
+
+# -- git branch, coloured by working-tree state ------------------------------
+# starship cannot style git_branch conditionally, so the branch is rendered by two
+# mutually exclusive custom modules and the built-in one is switched off below.
+#
+# "dirty" means tracked changes vs HEAD, staged or unstaged. Untracked files do NOT
+# count: this repo permanently carries untracked dirs (asm/, c/, cpp/, plans/), and
+# counting them would pin the pill amber forever and destroy the signal. The
+# untracked count still shows in the lavender git_status pill.
+#
+# COST: 4 process spawns per prompt (~200 ms -> ~420 ms here). See the note on
+# [git_branch] below for how to trade this back for a faster prompt.
+[custom.git_clean]
+require_repo = true
+when = "git diff --quiet --ignore-submodules HEAD"
+command = "git symbolic-ref -q --short HEAD || git rev-parse --short HEAD"
+shell = ["cmd", "/C"]
+style = "fg:crust bg:green"
+format = "[\uE0B6](fg:green)[ \uE0A0 $output ]($style)[\uE0B4](fg:green) "
+
+[custom.git_dirty]
+require_repo = true
+when = "git diff --quiet --ignore-submodules HEAD && exit 1 || exit 0"
+command = "git symbolic-ref -q --short HEAD || git rev-parse --short HEAD"
+shell = ["cmd", "/C"]
+style = "fg:crust bg:yellow"
+format = "[\uE0B6](fg:yellow)[ \uE0A0 $output ]($style)[\uE0B4](fg:yellow) "
+
+# Built-in branch module, switched off in favour of the two custom modules above.
+#
+# COST, measured on this machine: the custom modules run `git diff --quiet` plus a
+# branch lookup through cmd on every prompt - 4 process spawns - which takes the
+# prompt from ~200 ms to ~420 ms. Spawning a process here costs ~85 ms (consistent
+# with Defender scanning), so that lag is visible after every command.
+#
+# To trade the clean/dirty colour back for a snappier prompt:
+#   1. set `disabled = true` on [custom.git_clean] and [custom.git_dirty]
+#   2. in `format`, replace  ${custom.git_clean}${custom.git_dirty}  with  $git_branch
+#   3. replace the `disabled` line below with:
+#        symbol = "\uE0A0"
+#        style  = "fg:crust bg:green"
+#        format = "[\uE0B6](fg:green)[ $symbol $branch ]($style)[\uE0B4](fg:green) "
+[git_branch]
+disabled = true
+
+# -- git operation in progress -----------------------------------------------
+# The thing most worth knowing before you type another git command.
+#
+# NOTE: no outer ( ... ) conditional group here, unlike every other pill. Wrapping
+# $state in one makes the whole module render EMPTY - verified by bisection: the
+# group evaluator does not treat $state as a non-empty variable, so the group is
+# always dropped. The group is unnecessary anyway: git_state only activates while an
+# operation is actually in progress, so the module is already self-conditional.
+[git_state]
+style = "fg:crust bg:maroon"
+format = "[\uE0B6](fg:maroon)[ $state( $progress_current/$progress_total) ]($style)[\uE0B4](fg:maroon) "
+rebase = "REBASING"
+merge = "MERGING"
+revert = "REVERTING"
+cherry_pick = "CHERRY-PICKING"
+bisect = "BISECTING"
+am = "AM"
+am_or_rebase = "AM/REBASE"
+
+# -- git counts (informational) ----------------------------------------------
+[git_status]
+style = "fg:crust bg:lavender"
+format = "([\uE0B6](fg:lavender)[ $all_status$ahead_behind ]($style)[\uE0B4](fg:lavender) )"
+conflicted = "\U000F0787${count} "
+ahead = "\u2191${count} "
+behind = "\u2193${count} "
+diverged = "\u2195\u2191${ahead_count}\u2193${behind_count} "
+untracked = "?${count} "
+stashed = "\u2261${count} "
+modified = "!${count} "
+staged = "+${count} "
+renamed = "\u00BB${count} "
+deleted = "-${count} "
+
+# -- toolchains --------------------------------------------------------------
+# Each stays conditional: starship only activates these inside a matching project.
+[c]
+symbol = "\uE61E"
+style = "fg:crust bg:sapphire"
+format = "[\uE0B6](fg:sapphire)[ $symbol $name($version) ]($style)[\uE0B4](fg:sapphire) "
+
+[python]
+symbol = "\uE73C"
+style = "fg:crust bg:blue"
+format = "[\uE0B6](fg:blue)[ $symbol $version( $virtualenv) ]($style)[\uE0B4](fg:blue) "
+detect_extensions = ["py", "pyi"]
+
+[conda]
+symbol = "\uE24B"
+style = "fg:crust bg:teal"
+format = "[\uE0B6](fg:teal)[ $symbol $environment ]($style)[\uE0B4](fg:teal) "
+ignore_base = true
+
+[nodejs]
+symbol = "\uE718"
+style = "fg:crust bg:sapphire"
+format = "[\uE0B6](fg:sapphire)[ $symbol $version ]($style)[\uE0B4](fg:sapphire) "
+
+[rust]
+symbol = "\uE7A8"
+style = "fg:crust bg:sapphire"
+format = "[\uE0B6](fg:sapphire)[ $symbol $version ]($style)[\uE0B4](fg:sapphire) "
+
+[golang]
+symbol = "\uE627"
+style = "fg:crust bg:sapphire"
+format = "[\uE0B6](fg:sapphire)[ $symbol $version ]($style)[\uE0B4](fg:sapphire) "
+
+[dotnet]
+symbol = "\uE77F"
+style = "fg:crust bg:sapphire"
+format = "[\uE0B6](fg:sapphire)[ $symbol $tfm ]($style)[\uE0B4](fg:sapphire) "
+
+# -- timing & exit status ----------------------------------------------------
+[cmd_duration]
+min_time = 500
+style = "fg:text bg:surface1"
+format = "[\uE0B6](fg:surface1)[ \uF017 $duration ]($style)[\uE0B4](fg:surface1) "
+
+[status]
+disabled = false
+symbol = "\uF00D"
+style = "fg:crust bg:red"
+format = "[\uE0B6](fg:red)[ $symbol $status ]($style)[\uE0B4](fg:red) "
+map_symbol = false
+pipestatus = false
+
+# -- the prompt character ----------------------------------------------------
+[character]
+success_symbol = "[\u276F](bold green)"
+error_symbol = "[\u276F](bold red)"
+vimcmd_symbol = "[\u276E](bold mauve)"
+
+# -- noise suppression -------------------------------------------------------
+[package]
+disabled = true
+
+[battery]
+disabled = true
+
+[hostname]
+ssh_only = true
+
+[username]
+show_always = false
+
+# -- palette: Catppuccin Mocha -----------------------------------------------
+[palettes.catppuccin_mocha]
+rosewater = "#f5e0dc"
+flamingo = "#f2cdcd"
+pink = "#f5c2e7"
+mauve = "#cba6f7"
+red = "#f38ba8"
+maroon = "#eba0ac"
+peach = "#fab387"
+yellow = "#f9e2af"
+green = "#a6e3a1"
+teal = "#94e2d5"
+sky = "#89dceb"
+sapphire = "#74c7ec"
+blue = "#89b4fa"
+lavender = "#b4befe"
+text = "#cdd6f4"
+subtext1 = "#bac2de"
+subtext0 = "#a6adc8"
+overlay2 = "#9399b2"
+overlay1 = "#7f849c"
+overlay0 = "#6c7086"
+surface2 = "#585b70"
+surface1 = "#45475a"
+surface0 = "#313244"
+base = "#1e1e2e"
+mantle = "#181825"
+crust = "#11111b"
