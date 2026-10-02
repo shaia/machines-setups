@@ -1,5 +1,5 @@
-# Secrets — never commit. The dotfiles in macos/dotfiles/ are deliberately
-# limited to files that contain no credentials.
+# Secrets - never commit. Every tracked dotfile is deliberately limited to
+# config that contains no credentials.
 .ssh/
 **/gh/hosts.yml
 *.pem
@@ -12,18 +12,13 @@
 **/.aws/credentials
 
 # Machine-local overrides. These live in $HOME and are deliberately outside the
-# repo: a work git identity and per-machine env (GOPRIVATE, internal registries,
-# API keys) are not portable and do not belong in a personal, public snapshot.
-# Guarded here so a stray copy cannot drag them back in. The *.local patterns
-# cover zshrc.local and bashrc.local; the Windows PowerShell one carries a .ps1
-# suffix so the profile can dot-source it.
+# repo: identity, a work identity and per-machine env (GOPRIVATE, internal
+# registries, API keys) do not belong in a shared baseline. Guarded here so a
+# stray copy cannot drag them back in.
 **/dotfiles/gitconfig-local
 **/dotfiles/gitconfig-work
 **/dotfiles/*.local
 **/dotfiles/*.local.ps1
-
-# snapshot.sh scratch output — merge into Brewfile, then delete
-Brewfile.generated
 
 # macOS
 .DS_Store

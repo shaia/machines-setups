@@ -1,102 +1,132 @@
 # machines-setups
 
-Snapshots of the machines I develop on, and the scripts that replay them onto a
-fresh box. The point is that rebuilding a machine is a `git clone` and one
-command, not an afternoon of remembering what was installed.
+An opinionated developer-machine baseline for Windows and macOS. A fresh box
+becomes a working development machine with a `git clone` and one command.
 
-## Layout
-
-One directory per platform. Each is self-contained — clone the repo, run the
-script inside the directory that matches the machine.
-
-| Directory | Target |
-| --- | --- |
-| [`macos/`](macos/) | Apple Silicon Macs — Homebrew, zsh/oh-my-zsh, dotfiles, Go tooling, VS Code + Cursor extensions |
-| [`windows/`](windows/) | Windows 11 — winget, Visual Studio workloads, PowerShell profiles + starship, dotfiles, Go/npm/dotnet tooling, VS Code extensions |
+It started as a snapshot of two personal machines, and it is still derived
+from them, but it is no longer a replica. It installs a deliberate selection
+of tools and editor extensions, with the same choices on both platforms
+wherever the platforms allow. It does not install whatever happened to be
+installed somewhere.
 
 ```sh
+# macOS
 git clone <this repo> ~/development/machines-setups
-~/development/machines-setups/macos/install.sh --dry-run   # read it first
-~/development/machines-setups/macos/install.sh
+~/development/machines-setups/macos/install.sh --dry-run --profile go,web   # read it first
+~/development/machines-setups/macos/install.sh --profile go,web
 ```
 
 ```powershell
+# Windows
 git clone <this repo> $HOME\development\machines-setups
 cd $HOME\development\machines-setups\windows
-powershell -ExecutionPolicy Bypass -File .\install.ps1 -DryRun   # read it first
-powershell -ExecutionPolicy Bypass -File .\install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -DryRun -Profile go,web   # read it first
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -Profile go,web
 ```
 
-See [`macos/README.md`](macos/README.md) and [`windows/README.md`](windows/README.md)
-for the layer breakdown, what is deliberately not automated, and what has and
-has not been verified.
+## Core and profiles
 
-## The shape every platform directory follows
+Every machine gets **core**, which contains:
 
-Not enforced by anything — a convention, so a second platform reads like the
-first:
+- git, gh and delta
+- the starship prompt with a Nerd Font
+- ripgrep, fd, bat, jq, fzf, zoxide and lazygit
+- VS Code with a small set of language-neutral extensions
+- the platform's terminal and window tooling
 
-- **`install.sh` / `install.ps1`** — replays the snapshot. Split into named
-  layers selectable with `--only` / `--skip` (`-Only` / `-Skip` on Windows),
-  idempotent layer by layer (it inspects state, skips what is satisfied, and
-  says so), and `--dry-run` / `-DryRun` prints every mutating command without
-  running one. Written against the shell the target OS ships by default — bash
-  3.2 on macOS, Windows PowerShell 5.1 on Windows — since on a fresh machine
+Everything else is a **profile**, chosen at install time:
+
+| Profile | Adds |
+| --- | --- |
+| `cpp` | CMake, Ninja and LLVM. On Windows also Visual Studio 2026 with a curated C++ workload and GNU make. clangd, CMake Tools and LLDB extensions |
+| `go` | Go, plus gopls, dlv, staticcheck and golangci-lint |
+| `python` | uv, which also installs and manages Python 3.13. Ruff, Pylance and debugpy |
+| `web` | Node, pnpm, ESLint and Prettier |
+| `dotnet` | .NET SDK 10 (LTS) and C# Dev Kit |
+| `rust` | rustup with the stable toolchain, and rust-analyzer |
+| `java` | Amazon Corretto 21 and the Java extension pack |
+| `containers` | Docker Desktop (with WSL on Windows), kubectl, helm, k9s, kind |
+| `cloud` | AWS CLI, OpenTofu, Terragrunt |
+| `ai` | Ollama, the Claude desktop app, Claude Code CLI and extension |
+| `gpu` | Windows only: CUDA Toolkit and Nsight Compute |
+| `apps` | Chrome, Arc, Obsidian, Slack, Zoom, Postman |
+
+`all` selects every profile. A run with no profile installs core and lists
+the profiles.
+
+## Layout
+
+```text
+common/                 shared by both platforms
+  git/                  gitconfig, delta.gitconfig, global ignore
+  starship.toml         the prompt
+  profiles/<name>.txt   VS Code extensions, go tools, npm globals, uv Pythons
+macos/
+  install.sh
+  profiles/<name>.Brewfile
+  dotfiles/             zshrc, zprofile
+windows/
+  install.ps1
+  profiles/<name>.txt   winget ids, plus PowerShell modules in core
+  vsconfig/cpp.vsconfig the Visual Studio workload for the cpp profile
+  dotfiles/powershell/  profile.ps1, shell-ux.ps1
+```
+
+Each profile has two halves. The platform half is a Brewfile or a winget list.
+The common half holds the extensions and language tools, which are the same on
+both platforms. **To add a profile**, create one file or both under the same
+name. Both installers discover profiles from the file names, so nothing else
+needs registering. To add a tool to an existing profile, add one line.
+
+## The opinions, and why
+
+- **One prompt everywhere.** starship, configured once in `common/`, so the
+  prompt reads the same in Terminal, iTerm2 and VS Code on either platform.
+- **uv for Python, nothing else.** No conda and no python.org installers. uv
+  installs interpreters, makes virtual environments and runs tools, faster than
+  the alternatives and without a base environment leaking into every shell.
+- **clangd for C and C++.** It gives the same language features on every
+  platform and compiler, driven by `compile_commands.json`. Microsoft's
+  IntelliSense is not installed.
+- **OpenTofu, not Terraform.** One infrastructure-as-code CLI, and the one
+  that stays open source.
+- **Git that does not surprise you.** Pulls are fast-forward only, deleted
+  remote branches are pruned, rerere and zdiff3 conflict markers are on, and
+  `main` is the default branch.
+- **Nothing elevates itself, and nothing is upgraded.** Package installs skip
+  anything already present, and every layer is safe to re-run.
+
+## Conventions both platforms follow
+
+- **Layers.** Each installer is split into named layers, selectable with
+  `--only` / `--skip` (`-Only` / `-Skip`). Each layer is idempotent: it inspects
+  state, skips what is satisfied, and says so. `--dry-run` / `-DryRun` prints
+  every mutating command and runs none.
+- **The default shell.** Each installer is written for the shell the OS ships:
+  bash 3.2 on macOS and Windows PowerShell 5.1 on Windows. On a fresh machine
   there is nothing else.
-- **`snapshot.sh` / `snapshot.ps1`** — the other direction: regenerates the
-  inventory from the live machine so the checked-in copy does not rot.
-  `--diff` / `-Diff` reports drift and writes nothing.
-- **`README.md`** — the invisible knowledge. Why something is pinned, what the
-  script refuses to do, which drift is permanent and expected. Not a
-  restatement of what the script plainly says.
-- **`dotfiles/`** — stored without leading dots (`zshrc`, not `.zshrc`) so they
-  are visible to `ls` and to review, and symlinked into `$HOME` by the
-  `dotfiles` layer, which backs up whatever it replaces first. On Windows that
-  means a file symlink per file (which needs Developer Mode or an elevated
-  shell) and a junction per directory (which needs nothing).
+- **Dotfiles are symlinked, not copied.** Editing `~/.gitconfig` or the shell
+  profile edits this repo. Anything a linked file replaces is backed up first
+  to `~/.dotfiles-backup-<timestamp>`.
 
-Because dotfiles are **symlinked** rather than copied, editing `~/.zshrc` or
-`~\.gitconfig` edits this repo. That is the intent — the snapshot cannot drift
-from the machine — but it does mean `git status` here reacts to shell
-tinkering, and the snapshot scripts leave `dotfiles/` alone for the same reason.
-
-## Secrets
+## Secrets and personal config
 
 The root [`.gitignore`](.gitignore) is the boundary. Nothing credential-bearing
 is checked in: no `~/.ssh`, no `gh` hosts file, no keys, no `.netrc`, no AWS
-credentials.
+credentials. Every pattern matches at any depth, so check with
+`git check-ignore -v <path>` rather than assuming.
 
-Every pattern is written to match at any depth, so a new platform directory
-inherits the protection for free. That is why `.aws/credentials` is spelled
-`**/.aws/credentials` — a pattern containing a slash is otherwise anchored to
-the repo root, and `macos/.aws/credentials` would sail straight through. Keep
-new patterns unanchored, and check with `git check-ignore -v <path>` rather
-than assuming.
+Nothing personal is tracked either. Identity, secrets and employer-specific
+setup live in optional files under `$HOME`. The installers detect these files
+but never create them:
 
-Anything that needs a secret asks for it instead of carrying it. The macOS
-`dotfiles` layer prints the `security add-generic-password` command for the one
-API key `.zshrc` expects rather than storing a value; the Windows one prints the
-`[Environment]::SetEnvironmentVariable` command for the key its profiles expect
-in the User environment; and `gh auth login` stays manual on both. Keep that
-arrangement when adding a platform: a script may tell you how to supply a
-credential, never ship one.
+| File | Holds |
+| --- | --- |
+| `~/.gitconfig-local` | Git identity, credential helpers, URL rewrites, org-specific `includeIf` rules |
+| `~/.gitconfig-work` | A work identity, used for repos under `~/work/` or `~/development/work/` |
+| `~/.zshrc.local` | macOS per-machine env: API keys, `GOPRIVATE`, internal registries |
+| `~/.powershell.local.ps1` | The same for PowerShell on Windows |
 
-## Personal, and portable
-
-This is a personal repo, and the snapshots are meant to replay onto *any* Mac or
-Windows box — not one particular machine under one particular employer. So
-config that is true of only one machine stays out of it, in optional files under
-`$HOME` that the scripts detect but never manage: `~/.gitconfig-local` for git
-identity, `~/.gitconfig-work` for a work identity, and `~/.zshrc.local` (or
-`~\.powershell.local.ps1` and `~\.bashrc.local` on Windows) for per-machine
-environment such as `GOPRIVATE` or an API key. All of them are gitignored by
-name.
-
-The tracked configs keep only what is portable. `.gitconfig`, for instance, is
-preferences alone — no identity, and none of the URL rewrites that depend on a
-`~/.ssh/config` this repo deliberately does not ship. Restoring those on a
-different machine would break `git clone` rather than help it.
-
-The rule for anything new: if it would be wrong on someone else's machine — a
-hardcoded `/Users/<name>` or `C:\Users\<name>` path, an employer's private org,
-an internal registry — it belongs in a local override, not here.
+The rule for anything new is simple. If a setting would be wrong on another
+developer's machine, it belongs in a local override, not here. That covers a
+hardcoded home path, a private org, an internal registry and a personal app.
