@@ -1,0 +1,14 @@
+# Go.
+#
+# Cross-platform half of the go profile; the platform half is
+# windows/profiles/go.txt or macos/profiles/go.Brewfile. Line kinds:
+#   vscode <extension-id>     code --install-extension
+#   go <module>@<version>     go install
+#   npm <package>             npm install -g
+#   uv-python <version>       uv python install
+
+vscode golang.go
+go golang.org/x/tools/gopls@latest
+go github.com/go-delve/delve/cmd/dlv@latest
+go honnef.co/go/tools/cmd/staticcheck@latest
+go github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest

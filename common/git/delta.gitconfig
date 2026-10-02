@@ -1,0 +1,10 @@
+# delta (https://github.com/dandavison/delta) as git's pager. Included by
+# gitconfig through ~/.config/git/delta.gitconfig, which install links only
+# when delta is on PATH.
+[core]
+	pager = delta
+[interactive]
+	diffFilter = delta --color-only
+[delta]
+	navigate = true
+	line-numbers = true

@@ -1,0 +1,10 @@
+# Cloud and infrastructure as code: AWS CLI and OpenTofu.
+#
+# Cross-platform half of the cloud profile; the platform half is
+# windows/profiles/cloud.txt or macos/profiles/cloud.Brewfile. Line kinds:
+#   vscode <extension-id>     code --install-extension
+#   go <module>@<version>     go install
+#   npm <package>             npm install -g
+#   uv-python <version>       uv python install
+
+vscode opentofu.vscode-opentofu

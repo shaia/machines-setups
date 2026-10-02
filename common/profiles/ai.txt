@@ -1,0 +1,11 @@
+# AI: local models with Ollama, Claude desktop and Claude Code.
+#
+# Cross-platform half of the ai profile; the platform half is
+# windows/profiles/ai.txt or macos/profiles/ai.Brewfile. Line kinds:
+#   vscode <extension-id>     code --install-extension
+#   go <module>@<version>     go install
+#   npm <package>             npm install -g
+#   uv-python <version>       uv python install
+
+npm @anthropic-ai/claude-code
+vscode anthropic.claude-code

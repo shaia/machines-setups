@@ -1,0 +1,12 @@
+# Containers and Kubernetes.
+#
+# Cross-platform half of the containers profile; the platform half is
+# windows/profiles/containers.txt or macos/profiles/containers.Brewfile. Line kinds:
+#   vscode <extension-id>     code --install-extension
+#   go <module>@<version>     go install
+#   npm <package>             npm install -g
+#   uv-python <version>       uv python install
+
+vscode ms-azuretools.vscode-containers
+vscode ms-vscode-remote.remote-containers
+vscode ms-kubernetes-tools.vscode-kubernetes-tools

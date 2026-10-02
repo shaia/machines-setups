@@ -1,0 +1,55 @@
+# Opinionated, portable git defaults - the same file on Windows and macOS.
+#
+# Nothing personal lives here: identity, credential helpers, URL rewrites and
+# org-specific rules go in ~/.gitconfig-local, included at the bottom. Git
+# ignores a missing include path silently, so every include is optional.
+#
+# Careful: `git config --global` writes to ~/.gitconfig, which install links
+# to THIS file. Anything a tool adds globally (gh auth setup-git, git lfs
+# install) lands in the repo - move it into ~/.gitconfig-local.
+
+[init]
+	defaultBranch = main
+[push]
+	# `git push` on a new branch sets its upstream instead of erroring.
+	autoSetupRemote = true
+[fetch]
+	# Remote branches deleted upstream disappear locally too.
+	prune = true
+[pull]
+	# Never create a surprise merge commit; diverged branches need a decision.
+	ff = only
+[rebase]
+	autoStash = true
+	updateRefs = true
+[rerere]
+	# Remember conflict resolutions and replay them on the next rebase.
+	enabled = true
+[merge]
+	conflictStyle = zdiff3
+[diff]
+	colorMoved = default
+	algorithm = histogram
+[branch]
+	sort = -committerdate
+[tag]
+	sort = version:refname
+[help]
+	autocorrect = prompt
+
+# delta as the pager. install links this file only when delta is on PATH,
+# so a machine without it keeps git's default pager instead of erroring.
+[include]
+	path = ~/.config/git/delta.gitconfig
+
+# Identity, credentials, URL rewrites. Absent on a fresh machine, where git
+# refuses to commit until user.name and user.email are set.
+[include]
+	path = ~/.gitconfig-local
+
+# Work identity. Must stay last: git applies config in file order and the last
+# value wins, so this follows the include above to override what it sets.
+[includeIf "gitdir/i:~/work/"]
+	path = ~/.gitconfig-work
+[includeIf "gitdir/i:~/development/work/"]
+	path = ~/.gitconfig-work

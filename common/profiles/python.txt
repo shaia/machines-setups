@@ -1,0 +1,14 @@
+# Python, managed entirely by uv: no conda, no python.org installers.
+#
+# Cross-platform half of the python profile; the platform half is
+# windows/profiles/python.txt or macos/profiles/python.Brewfile. Line kinds:
+#   vscode <extension-id>     code --install-extension
+#   go <module>@<version>     go install
+#   npm <package>             npm install -g
+#   uv-python <version>       uv python install
+
+uv-python 3.13
+vscode ms-python.python
+vscode ms-python.vscode-pylance
+vscode ms-python.debugpy
+vscode charliermarsh.ruff

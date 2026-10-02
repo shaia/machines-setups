@@ -1,0 +1,15 @@
+# C and C++: clangd for language features, CMake, LLDB.
+#
+# Cross-platform half of the cpp profile; the platform half is
+# windows/profiles/cpp.txt or macos/profiles/cpp.Brewfile. Line kinds:
+#   vscode <extension-id>     code --install-extension
+#   go <module>@<version>     go install
+#   npm <package>             npm install -g
+#   uv-python <version>       uv python install
+
+# clangd rather than Microsoft's cpptools IntelliSense: faster, and the same
+# engine on every platform. It needs compile_commands.json from the build.
+vscode llvm-vs-code-extensions.vscode-clangd
+vscode ms-vscode.cmake-tools
+vscode vadimcn.vscode-lldb
+vscode matepek.vscode-catch2-test-adapter

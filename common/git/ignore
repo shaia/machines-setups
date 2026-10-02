@@ -1,0 +1,15 @@
+# Global gitignore (~/.config/git/ignore): files no repository should ever track.
+
+# OS metadata
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# Editor leftovers
+*~
+*.swp
+*.swo
+
+# Per-user Claude Code settings
+**/.claude/settings.local.json

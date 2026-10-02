@@ -1,0 +1,10 @@
+# Java 21 LTS.
+#
+# Cross-platform half of the java profile; the platform half is
+# windows/profiles/java.txt or macos/profiles/java.Brewfile. Line kinds:
+#   vscode <extension-id>     code --install-extension
+#   go <module>@<version>     go install
+#   npm <package>             npm install -g
+#   uv-python <version>       uv python install
+
+vscode vscjava.vscode-java-pack

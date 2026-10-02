@@ -1,0 +1,12 @@
+# Web: Node LTS with pnpm.
+#
+# Cross-platform half of the web profile; the platform half is
+# windows/profiles/web.txt or macos/profiles/web.Brewfile. Line kinds:
+#   vscode <extension-id>     code --install-extension
+#   go <module>@<version>     go install
+#   npm <package>             npm install -g
+#   uv-python <version>       uv python install
+
+npm pnpm
+vscode dbaeumer.vscode-eslint
+vscode esbenp.prettier-vscode

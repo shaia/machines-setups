@@ -20,8 +20,8 @@
 #   sapphire toolchains        blue python        teal conda
 #   red      non-zero exit status
 #
-# Requires a Nerd Font installed MACHINE-WIDE (HKLM). Per-user font installs are
-# invisible to Windows Terminal (MSIX-packaged) and to VS Code (Chromium).
+# Requires a Nerd Font. On Windows install it machine-wide (the winget package does):
+# per-user fonts are invisible to Windows Terminal (MSIX) and to VS Code (Chromium).
 # Docs: https://starship.rs/config/
 
 "$schema" = 'https://starship.rs/config-schema.json'
@@ -32,8 +32,7 @@ palette = 'catppuccin_mocha'
 format = """
 [\u256D\u2500](overlay0)\
 $directory\
-${custom.git_clean}\
-${custom.git_dirty}\
+$git_branch\
 $git_state\
 $git_status\
 $c\
@@ -68,49 +67,11 @@ read_only = " \uF023"
 "Downloads" = "dl"
 "OneDrive" = "\uF0C2"
 
-# -- git branch, coloured by working-tree state ------------------------------
-# starship cannot style git_branch conditionally, so the branch is rendered by two
-# mutually exclusive custom modules and the built-in one is switched off below.
-#
-# "dirty" means tracked changes vs HEAD, staged or unstaged. Untracked files do NOT
-# count: this repo permanently carries untracked dirs (asm/, c/, cpp/, plans/), and
-# counting them would pin the pill amber forever and destroy the signal. The
-# untracked count still shows in the lavender git_status pill.
-#
-# COST: 4 process spawns per prompt (~200 ms -> ~420 ms here). See the note on
-# [git_branch] below for how to trade this back for a faster prompt.
-[custom.git_clean]
-require_repo = true
-when = "git diff --quiet --ignore-submodules HEAD"
-command = "git symbolic-ref -q --short HEAD || git rev-parse --short HEAD"
-shell = ["cmd", "/C"]
-style = "fg:crust bg:green"
-format = "[\uE0B6](fg:green)[ \uE0A0 $output ]($style)[\uE0B4](fg:green) "
-
-[custom.git_dirty]
-require_repo = true
-when = "git diff --quiet --ignore-submodules HEAD && exit 1 || exit 0"
-command = "git symbolic-ref -q --short HEAD || git rev-parse --short HEAD"
-shell = ["cmd", "/C"]
-style = "fg:crust bg:yellow"
-format = "[\uE0B6](fg:yellow)[ \uE0A0 $output ]($style)[\uE0B4](fg:yellow) "
-
-# Built-in branch module, switched off in favour of the two custom modules above.
-#
-# COST, measured on this machine: the custom modules run `git diff --quiet` plus a
-# branch lookup through cmd on every prompt - 4 process spawns - which takes the
-# prompt from ~200 ms to ~420 ms. Spawning a process here costs ~85 ms (consistent
-# with Defender scanning), so that lag is visible after every command.
-#
-# To trade the clean/dirty colour back for a snappier prompt:
-#   1. set `disabled = true` on [custom.git_clean] and [custom.git_dirty]
-#   2. in `format`, replace  ${custom.git_clean}${custom.git_dirty}  with  $git_branch
-#   3. replace the `disabled` line below with:
-#        symbol = "\uE0A0"
-#        style  = "fg:crust bg:green"
-#        format = "[\uE0B6](fg:green)[ $symbol $branch ]($style)[\uE0B4](fg:green) "
+# -- git branch --------------------------------------------------------------
 [git_branch]
-disabled = true
+symbol = "\uE0A0"
+style = "fg:crust bg:green"
+format = "[\uE0B6](fg:green)[ $symbol $branch ]($style)[\uE0B4](fg:green) "
 
 # -- git operation in progress -----------------------------------------------
 # The thing most worth knowing before you type another git command.

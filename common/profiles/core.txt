@@ -1,0 +1,18 @@
+# Core: every machine gets this.
+#
+# Cross-platform half of the core profile; the platform half is
+# windows/profiles/core.txt or macos/profiles/core.Brewfile. Line kinds:
+#   vscode <extension-id>     code --install-extension
+#   go <module>@<version>     go install
+#   npm <package>             npm install -g
+#   uv-python <version>       uv python install
+
+vscode eamodio.gitlens
+vscode editorconfig.editorconfig
+vscode streetsidesoftware.code-spell-checker
+vscode davidanson.vscode-markdownlint
+vscode redhat.vscode-yaml
+vscode tamasfe.even-better-toml
+vscode github.vscode-github-actions
+vscode ms-vscode-remote.remote-ssh
+vscode pkief.material-icon-theme

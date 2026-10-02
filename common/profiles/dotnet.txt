@@ -1,0 +1,10 @@
+# .NET.
+#
+# Cross-platform half of the dotnet profile; the platform half is
+# windows/profiles/dotnet.txt or macos/profiles/dotnet.Brewfile. Line kinds:
+#   vscode <extension-id>     code --install-extension
+#   go <module>@<version>     go install
+#   npm <package>             npm install -g
+#   uv-python <version>       uv python install
+
+vscode ms-dotnettools.csdevkit
