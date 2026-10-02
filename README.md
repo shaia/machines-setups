@@ -31,7 +31,7 @@ Every machine gets **core**, which contains:
 - the starship prompt with a Nerd Font
 - ripgrep, fd, bat, eza, jq, yq, fzf, zoxide, lazygit, yazi, sd, glow, tldr, btop, dust, duf, hyperfine, gping, doggo and fastfetch
 - uv, and pre-commit installed through it
-- VS Code with language-neutral extensions: GitLens, Error Lens, GitHub PRs, Copilot, Todo Tree, Mermaid and Draw.io among them
+- VS Code with language-neutral extensions: GitLens, Error Lens, GitHub PRs, Todo Tree, Mermaid and Draw.io among them. GitHub Copilot is built into VS Code, so it is not installed separately
 - on Windows: WSL 2 with Ubuntu and VS Code's Remote WSL extension, gsudo, PowerToys, EarTrumpet, Everything, Sysinternals, and the Terminal-Icons, PSScriptAnalyzer and WinGet modules; plus file extensions shown in Explorer and long path support
 
 Everything else is a **profile**, chosen at install time:

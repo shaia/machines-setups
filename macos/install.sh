@@ -293,6 +293,7 @@ preflight() {
 layer_packages() {
   step "Homebrew packages"
 
+  brew_updated=false
   for p in $PROFILES; do
     brewfile="$SCRIPT_DIR/profiles/$p.Brewfile"
     [[ -f "$brewfile" ]] || continue
@@ -301,6 +302,14 @@ layer_packages() {
     if [[ "$DRY_RUN" == false ]] && brew bundle check --file="$brewfile" --no-upgrade >/dev/null 2>&1; then
       result ok "$label"
       continue
+    fi
+    # Refresh Homebrew's package metadata once before installing anything.
+    # With auto-update off (HOMEBREW_NO_AUTO_UPDATE, as on CI runners) the
+    # metadata can be weeks old and name a download that no longer exists.
+    # This updates the package list only; installed packages stay as they are.
+    if [[ "$brew_updated" == false ]]; then
+      run_retry brew update --quiet || warn "brew update failed; installing from the current metadata."
+      brew_updated=true
     fi
     # --no-upgrade: install what is missing, leave existing versions alone.
     run_retry brew bundle install --file="$brewfile" --no-upgrade || true

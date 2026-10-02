@@ -19,8 +19,6 @@ vscode ms-vscode-remote.remote-ssh
 vscode pkief.material-icon-theme
 vscode usernamehw.errorlens
 vscode github.vscode-pull-request-github
-vscode github.copilot
-vscode github.copilot-chat
 vscode ms-vscode.powershell
 vscode gruntfuggly.todo-tree
 vscode bierner.markdown-mermaid
