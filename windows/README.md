@@ -51,34 +51,37 @@ because otherwise the exit code it returns becomes an array of output lines.
 to run `.\install.ps1`. The `powershell -ExecutionPolicy Bypass -File` form
 above works regardless.
 
-**Symlinks need Developer Mode.** Turn it on in Settings › System › For
-developers, or run elevated. The Settings toggle writes
+**Symlinks need Developer Mode.** The system layer turns it on when elevated,
+and otherwise queues the command in the summary. It sets
 `AllowDevelopmentWithoutDevLicense=1` under
-`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock`, and it takes
-effect for new processes at once. Links are made with cmd's `mklink`.
-Under Windows PowerShell, `New-Item -ItemType SymbolicLink` demands elevation
-even with Developer Mode on, and `mklink` does not.
+`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock`, the same
+value as Settings › System › For developers, and it takes effect for new
+processes at once. Links are made with cmd's `mklink`. Under Windows
+PowerShell, `New-Item -ItemType SymbolicLink` demands elevation even with
+Developer Mode on, and `mklink` does not.
 
 **The Visual C++ runtime installs first.** The packages layer adds
 `Microsoft.VCRedist.2015+.x64`, or `.arm64` on an ARM machine, ahead of every
 profile. uv and many other tools need it on a clean box, and the id depends on
 the architecture, so it is not in a profile file.
 
-**WSL 2 is best-effort.** If `wsl --status` fails, the system layer first asks
-why. With no hypervisor running and firmware virtualization off, it flags the
-real cause: turn on VT-x/AMD-V in the BIOS/UEFI, or on a VM expose nested
-virtualization. Otherwise it queues `wsl --install --no-distribution`, with the
-two `dism` commands as the fallback. A running hypervisor makes the processor
-report firmware virtualization as off, so the hypervisor check comes first. The
-Ubuntu install falls back to `--web-download` on machines without Store access.
+**WSL 2 is in core, and best-effort.** The first `wsl --install` enables the
+Virtual Machine Platform feature, which needs elevation and a reboot. If
+`wsl --status` fails, the system layer first asks why. With no hypervisor
+running and firmware virtualization off, it flags the real cause: turn on
+VT-x/AMD-V in the BIOS/UEFI, or on a VM expose nested virtualization.
+Otherwise it queues `wsl --install --no-distribution` in the summary, with the
+two `dism` commands as the fallback; reboot, then re-run `-Only system`. A
+running hypervisor makes the processor report firmware virtualization as off,
+so the hypervisor check comes first. Once WSL works, the layer installs Ubuntu
+without launching it, falling back to `--web-download` on machines without
+Store access. Launch Ubuntu once from the Start menu to create your Linux user.
 
-**`winget export`, not the WinGet module, answers "what is installed".**
-Microsoft's own setup queries the `Microsoft.WinGet.Client` module instead. On
-this machine the module query took about 3.8 seconds and the export about 2.6.
-That is one uncontrolled measurement, but it gives no reason for a second code
-path. The export gets one retry instead. After each install,
-`winget list --id <id> --exact` confirms the package is really there, because
-some installers report success on failure and failure on a pending reboot.
+**`winget export` answers "what is installed".** It is the one view that is
+not a truncated fixed-width table, and it gets one retry. The
+`Microsoft.WinGet.Client` module is no faster, so it is not used for this. After each install, `winget list --id <id> --exact` confirms the
+package is really there, because some installers report success on failure
+and failure on a pending reboot.
 
 **Nothing elevates itself.** A machine-scope winget install raises its own UAC
 prompt, so a first run is smoother from an elevated shell. Core installs gsudo,
@@ -129,13 +132,7 @@ unless `LongPathsEnabled` is set under
 `HKLM\SYSTEM\CurrentControlSet\Control\FileSystem`, and Git for Windows ignores
 that setting unless `core.longpaths` is true. The shared gitconfig sets the
 second. The first is machine-wide, so the system layer sets it only from an
-elevated shell and otherwise prints the `gsudo` command for it.
-
-**WSL 2 is in core.** The first `wsl --install` enables the Virtual Machine
-Platform feature, which needs elevation and a reboot. Until then the system
-layer prints `gsudo wsl --install --no-distribution`. After the reboot it
-installs Ubuntu without launching it. Launch Ubuntu once from the Start menu to
-create your Linux user.
+elevated shell and otherwise queues the command in the summary.
 
 **Windows profiles can carry their own extensions.** A `vscode <id>` line in a
 Windows profile file adds an extension that only makes sense on Windows, such as
@@ -160,18 +157,16 @@ install the Build Tools itself.
 - To check identity, use `git config --global --includes user.email`. Without
   `--includes`, git reads the named file only and does not follow the include.
 
-## What has been verified
+## Testing
 
-The following ran on a Windows 11 machine under both Windows PowerShell 5.1
-and PowerShell 7.6:
+[CI](../.github/workflows/ci.yml) runs this installer on a clean
+`windows-latest` runner under Windows PowerShell 5.1, on every push, every pull
+request and weekly. It installs core plus `go`, `python` and `web`, runs a
+second time and requires the summary to show nothing changed and nothing
+failed, then checks git, gh, ripgrep, starship, Go, gopls, Node, pnpm, Python
+through uv and pre-commit from a fresh shell. The run's logs are uploaded as an
+artifact.
 
-- Both editions parse the script, and it is ASCII-only.
-- Dry runs of core, `-Profile go,python,web`, `-Profile all` and `-Profile lowlevel` produce the expected plans and summaries.
-- A real run of the `dotfiles` and `vs` layers reports everything already fine and exits 0.
-- A run started while another holds the lock exits with code 3.
-- The registry helper was run for real against a throwaway key: it created the key and confirmed the value, reported "already fine" on the second call, and queued a machine-wide value as manual without elevation.
-- Every winget id resolves with `winget show --exact`.
-
-The CI workflow is the first test on a clean machine. It runs once the
-workflow is pushed. Not yet run anywhere: `setup.exe modify`, and the WSL
-fallbacks on a machine where WSL is off.
+CI does not cover the `cpp`, `lowlevel`, `gpu`, `containers` and `apps`
+profiles, `setup.exe modify`, or WSL, which hosted runners cannot run. Use
+`-DryRun` to see what a run would do before running it.

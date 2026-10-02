@@ -67,17 +67,23 @@ or the prompt shows boxes where its glyphs should be.
 current release, and the LTS formulae are keg-only. Windows gets LTS because
 that is what winget ships.
 
-**Git uses https.** The old personal snapshot rewrote every `github.com` URL to
-ssh. A new machine has no ssh key yet, and that rewrite broke `git clone`
-until it did. If you prefer ssh, put the rewrite in `~/.gitconfig-local`.
+**Git uses https.** The shared gitconfig does not rewrite `github.com` URLs to
+ssh: a new machine has no ssh key yet, and that rewrite would make `git clone`
+fail until it does. If you prefer ssh, put the rewrite in `~/.gitconfig-local`.
 
 **A trap.** `git config --global` writes to `~/.gitconfig`, which is a link
 into this repo. So `gh auth setup-git` and `git lfs install` add their
 sections **to the repo**. Move them into `~/.gitconfig-local`.
 
-**Verified mostly off a Mac.** The CI workflow runs it on a clean macOS
-runner once pushed. Before that, the script was rewritten on Windows. It passes
-`bash -n`, and argument parsing and the dotfiles, tooling and extensions layers
-were exercised in dry-run mode under Git Bash against a scratch `$HOME`. Every
-Homebrew formula and cask name resolves on formulae.brew.sh. Run `--dry-run`
-first on a real Mac.
+## Testing
+
+[CI](../.github/workflows/ci.yml) runs this installer on a clean `macos-latest`
+runner on every push, every pull request and weekly. It installs core plus
+`go`, `python` and `web`, runs a second time and requires the summary to show
+nothing changed and nothing failed, then checks git, gh, ripgrep, starship,
+Go, gopls, Node, pnpm, Python through uv and pre-commit from a fresh login
+shell. The run's logs are uploaded as an artifact.
+
+Hosted runners already have Homebrew, so CI does not exercise the pinned
+Homebrew installer, and it does not cover the `cpp`, `containers`, `ai` and
+`apps` profiles. Use `--dry-run` to see what a run would do before running it.

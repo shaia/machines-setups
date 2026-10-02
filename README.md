@@ -3,11 +3,9 @@
 An opinionated developer-machine baseline for Windows and macOS. A fresh box
 becomes a working development machine with a `git clone` and one command.
 
-It started as a snapshot of two personal machines, and it is still derived
-from them, but it is no longer a replica. It installs a deliberate selection
-of tools and editor extensions, with the same choices on both platforms
-wherever the platforms allow. It does not install whatever happened to be
-installed somewhere.
+It installs a deliberate selection of tools and editor extensions: a core
+every machine gets, plus profiles you pick per machine. The choices are the
+same on both platforms wherever the platforms allow.
 
 ```sh
 # macOS
@@ -101,8 +99,6 @@ needs registering. To add a tool to an existing profile, add one line.
 - **Bruno over Postman, HTTP Toolkit over Fiddler.** Bruno keeps API collections
   as plain files in the repo, with no account and no cloud sync. HTTP Toolkit is
   the open-source successor to the free Fiddler, which no longer gets updates.
-  Both came out of reviewing an older well-known Windows tool list against what
-  has replaced its picks since.
 - **Git that does not surprise you.** Pulls are fast-forward only, deleted
   remote branches are pruned, rerere and zdiff3 conflict markers are on, and
   `main` is the default branch.
