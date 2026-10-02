@@ -31,10 +31,10 @@ Every machine gets **core**, which contains:
 - Warp as the terminal (iTerm2 and Windows Terminal stay configured too)
 - git, gh, delta, difftastic and act
 - the starship prompt with a Nerd Font
-- ripgrep, fd, bat, eza, jq, yq, fzf, zoxide, lazygit, sd, glow, tldr, btop, dust, duf, hyperfine, gping, doggo and fastfetch
+- ripgrep, fd, bat, eza, jq, yq, fzf, zoxide, lazygit, yazi, sd, glow, tldr, btop, dust, duf, hyperfine, gping, doggo and fastfetch
 - uv, and pre-commit installed through it
 - VS Code with language-neutral extensions: GitLens, Error Lens, GitHub PRs, Copilot, Todo Tree, Mermaid and Draw.io among them
-- on Windows: WSL 2 with Ubuntu, gsudo, PowerToys, Everything, Sysinternals, and the Terminal-Icons, PSScriptAnalyzer and WinGet modules; plus file extensions shown in Explorer and long path support
+- on Windows: WSL 2 with Ubuntu and VS Code's Remote WSL extension, gsudo, PowerToys, EarTrumpet, Everything, Sysinternals, and the Terminal-Icons, PSScriptAnalyzer and WinGet modules; plus file extensions shown in Explorer and long path support
 
 Everything else is a **profile**, chosen at install time:
 
@@ -43,7 +43,7 @@ Everything else is a **profile**, chosen at install time:
 | `cpp` | CMake, Ninja and LLVM. On Windows also Visual Studio 2026 with a curated C++ workload and GNU make. clangd, CMake Tools and LLDB extensions |
 | `go` | Go, plus gopls, dlv, staticcheck and golangci-lint |
 | `python` | Python 3.13 through uv (which is in core). Ruff, Pylance and debugpy |
-| `web` | Node, pnpm, xh, mkcert, ESLint and Prettier |
+| `web` | Node, pnpm, xh, mkcert, Bruno, HTTP Toolkit, ESLint and Prettier |
 | `dotnet` | .NET SDK 10 (LTS) and C# Dev Kit |
 | `rust` | rustup with the stable toolchain, and rust-analyzer |
 | `java` | Amazon Corretto 21 and the Java extension pack |
@@ -51,8 +51,8 @@ Everything else is a **profile**, chosen at install time:
 | `cloud` | AWS CLI, OpenTofu, Terragrunt |
 | `ai` | Ollama, the Claude desktop app, Claude Code, Gemini CLI and Codex CLI, plus the Claude Code extension |
 | `gpu` | Windows only: CUDA Toolkit and Nsight Compute |
-| `lowlevel` | Windows only, pulls in `cpp`: WinDbg, x64dbg, the WDK with its Visual Studio extension and Spectre libraries, PE-bear, Dependencies, ImHex, HxD, Cutter, Binary Ninja Free, PerfView, Tracy, the Windows Performance Toolkit, System Informer, Cppcheck, sccache, NASM. Ghidra, VTune, uProf, OSR Driver Loader and Hyper-V are listed as manual steps |
-| `apps` | Chrome, Arc, Obsidian, Slack, Zoom, Postman. On Windows also ShareX and WizTree |
+| `lowlevel` | Windows only, pulls in `cpp`: WinDbg, x64dbg, the WDK with its Visual Studio extension and Spectre libraries, PE-bear, Dependencies, ImHex, HxD, Cutter, Binary Ninja Free, PerfView, Tracy, the Windows Performance Toolkit, System Informer, Cppcheck, sccache, NASM, and VS Code's Hex Editor. Ghidra, VTune, uProf, OSR Driver Loader and Hyper-V are listed as manual steps |
+| `apps` | Chrome, Arc, Obsidian, Slack, Zoom. On Windows also ShareX and WizTree |
 
 `all` selects every profile. A run with no profile installs core and lists
 the profiles.
@@ -70,7 +70,7 @@ macos/
   dotfiles/             zshrc, zprofile
 windows/
   install.ps1
-  profiles/<name>.txt   winget ids, `psmodule` lines, and `requires <profile>`
+  profiles/<name>.txt   winget ids, plus `psmodule`, `requires <profile>` and Windows-only `vscode` lines
   vsconfig/<name>.vsconfig  Visual Studio components a profile adds (cpp, lowlevel)
   dotfiles/powershell/  profile.ps1, shell-ux.ps1
 ```
@@ -98,6 +98,11 @@ needs registering. To add a tool to an existing profile, add one line.
   IntelliSense is not installed.
 - **OpenTofu, not Terraform.** One infrastructure-as-code CLI, and the one
   that stays open source.
+- **Bruno over Postman, HTTP Toolkit over Fiddler.** Bruno keeps API collections
+  as plain files in the repo, with no account and no cloud sync. HTTP Toolkit is
+  the open-source successor to the free Fiddler, which no longer gets updates.
+  Both came out of reviewing an older well-known Windows tool list against what
+  has replaced its picks since.
 - **Git that does not surprise you.** Pulls are fast-forward only, deleted
   remote branches are pruned, rerere and zdiff3 conflict markers are on, and
   `main` is the default branch.

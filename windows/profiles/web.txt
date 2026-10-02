@@ -7,3 +7,5 @@
 OpenJS.NodeJS.LTS
 ducaale.xh                      # HTTP client
 FiloSottile.mkcert              # locally trusted dev certificates
+Bruno.Bruno                     # API client; collections are plain files in git
+HTTPToolKit.HTTPToolKit         # intercept and inspect HTTP(S) traffic

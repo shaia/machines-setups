@@ -25,6 +25,7 @@ jqlang.jq
 junegunn.fzf                    # Ctrl+R / Ctrl+T through PSFzf
 ajeetdsouza.zoxide              # z <dir>
 7zip.7zip
+sxyazi.yazi                     # terminal file manager with previews (y)
 eza-community.eza               # ll
 aristocratos.btop4win           # btop
 tldr-pages.tlrc                 # tldr <command>
@@ -45,7 +46,8 @@ nektos.act                      # run GitHub Actions locally
 Wilfred.difftastic              # git dft
 
 # PowerShell modules shell-ux.ps1 loads, installed into pwsh 7's user scope.
-# 'psmodule <name>' lines are the one non-winget kind in these files.
+# 'psmodule <name>' and 'vscode <extension-id>' lines are the non-winget kinds
+# in these files; vscode lines are for Windows-only extensions.
 psmodule PSFzf                  # fzf key bindings
 psmodule posh-git               # git tab completion
 psmodule CompletionPredictor    # IntelliSense-driven inline predictions
@@ -55,9 +57,11 @@ psmodule Microsoft.WinGet.Client  # winget cmdlets for scripting
 
 # Windows platform. The system layer installs a distro and checks the settings.
 Microsoft.WSL                   # WSL 2; Ubuntu is installed by the system layer
+vscode ms-vscode-remote.remote-wsl  # open folders inside WSL from VS Code
 
 # Editor and desktop
 Microsoft.VisualStudioCode
 Microsoft.PowerToys
+File-New-Project.EarTrumpet     # per-app volume from the tray
 voidtools.Everything            # instant filename search
 Microsoft.Sysinternals.Suite    # Process Explorer, Process Monitor, Autoruns

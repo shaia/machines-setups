@@ -23,6 +23,7 @@ brew "eza"                      # `ls` is aliased to it in .zshrc
 brew "jq"
 brew "fzf"                      # Ctrl+R / Ctrl+T, bound in .zshrc
 brew "zoxide"                   # z <dir>
+brew "yazi"                     # terminal file manager with previews
 brew "btop"
 brew "tlrc"                     # tldr <command>
 brew "yq"                       # jq for YAML

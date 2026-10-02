@@ -137,6 +137,11 @@ layer prints `gsudo wsl --install --no-distribution`. After the reboot it
 installs Ubuntu without launching it. Launch Ubuntu once from the Start menu to
 create your Linux user.
 
+**Windows profiles can carry their own extensions.** A `vscode <id>` line in a
+Windows profile file adds an extension that only makes sense on Windows, such as
+Remote WSL in core and the Hex Editor in `lowlevel`. Extensions shared with
+macOS stay in `common/profiles/`.
+
 **Profiles can require profiles.** A `requires <profile>` line in a profile file
 pulls that profile in, so `-Profile lowlevel` alone also selects `cpp`. The WDK
 package in `lowlevel` is pinned to the same Windows SDK version (26100) as

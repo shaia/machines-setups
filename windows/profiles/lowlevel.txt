@@ -42,3 +42,6 @@ Mozilla.sccache                 # compiler cache for C, C++ and Rust
 
 # Assembly. MASM (ml64) ships with MSVC.
 NASM.NASM
+
+# VS Code
+vscode ms-vscode.hexeditor      # hex editor inside VS Code

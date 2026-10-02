@@ -9,6 +9,5 @@ TheBrowserCompany.Arc
 Obsidian.Obsidian
 SlackTechnologies.Slack
 Zoom.Zoom
-Postman.Postman
 ShareX.ShareX                   # screenshots and screen recording
 AntibodySoftware.WizTree        # disk-usage visualiser

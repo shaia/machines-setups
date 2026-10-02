@@ -6,3 +6,5 @@
 brew "node"                     # current release; Windows gets LTS, as each package manager ships
 brew "xh"                       # HTTP client
 brew "mkcert"                   # locally trusted dev certificates
+cask "bruno"                    # API client; collections are plain files in git
+cask "http-toolkit"             # intercept and inspect HTTP(S) traffic

@@ -314,9 +314,15 @@ function Get-ProfileEntries {
             }
         }
         else {
-            foreach ($e in @(Get-Entries (Join-Path $CommonDir "profiles\$p.txt"))) {
-                $parts = $e -split ' ', 2
-                if ($parts.Count -eq 2 -and $parts[0] -eq $Kind) { $out += $parts[1] }
+            # Shared lines first. A Windows profile file may add its own vscode
+            # lines too, for Windows-only extensions (Remote WSL, Hex Editor).
+            $files = @(Join-Path $CommonDir "profiles\$p.txt")
+            if ($Kind -eq 'vscode') { $files += Join-Path $ScriptDir "profiles\$p.txt" }
+            foreach ($file in $files) {
+                foreach ($e in @(Get-Entries $file)) {
+                    $parts = $e -split ' ', 2
+                    if ($parts.Count -eq 2 -and $parts[0] -eq $Kind) { $out += $parts[1] }
+                }
             }
         }
     }
