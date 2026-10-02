@@ -1,0 +1,9 @@
+# Rust.
+#
+# winget package ids, one per line, installed with `winget install --id <id> --exact`
+# unless already installed. The cross-platform half of this profile is
+# common/profiles/rust.txt.
+
+# rustup's MSVC toolchain links with the Visual Studio C++ tools: select the
+# cpp profile too, or rustup-init will ask to install Build Tools itself.
+Rustlang.Rustup

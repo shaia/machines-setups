@@ -1,23 +1,27 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-Rebuild this Windows machine's development environment from the snapshot in
-this directory.
+Set up an opinionated Windows development machine: a core every developer
+gets, plus the language and tool profiles you pick.
 
 .DESCRIPTION
-  .\install.ps1                          # every layer
-  .\install.ps1 -Only winget,dotfiles    # just those layers
-  .\install.ps1 -Skip extensions         # everything but that layer
-  .\install.ps1 -DryRun                  # print every mutating command, run none
+  .\install.ps1                            # core only; lists the profiles
+  .\install.ps1 -Profile go,python,web     # core plus those profiles
+  .\install.ps1 -Profile all               # everything
+  .\install.ps1 -Only dotfiles             # just that layer
+  .\install.ps1 -Skip extensions           # every layer but that one
+  .\install.ps1 -DryRun                    # print every mutating command, run none
 
 A fresh Windows install refuses to run local scripts until the execution
 policy allows it; this form works regardless:
 
   powershell -ExecutionPolicy Bypass -File .\install.ps1 -DryRun
 
-Preflight (winget, git, elevation, symlink ability) always runs; every other
-layer depends on it. Every layer is safe to re-run: it inspects the current
-state, skips what is already satisfied, and says what it skipped.
+Profiles live in two halves: windows\profiles\<name>.txt (winget ids and
+PowerShell modules) and ..\common\profiles\<name>.txt (VS Code extensions, Go
+tools, npm globals, uv Pythons, shared with macOS). Preflight (winget, git,
+elevation, symlink ability) always runs. Every layer is safe to re-run: it
+inspects the current state, skips what is already satisfied, and says so.
 
 Written for the Windows PowerShell 5.1 that ships with Windows - no ternary,
 no &&, no $IsWindows, every function result wrapped in @() - so it runs on a
@@ -26,6 +30,10 @@ BOM-less file as the ANSI code page.
 #>
 [CmdletBinding()]
 param(
+    # Not named $Profile: PowerShell variables are case-insensitive, and that
+    # would shadow the automatic $PROFILE. -Profile still works as an alias.
+    [Alias('Profile')]
+    [string[]]$Profiles,
     [string[]]$Only,
     [string[]]$Skip,
     [switch]$DryRun,
@@ -36,18 +44,23 @@ Set-StrictMode -Version 2
 $ErrorActionPreference = 'Stop'
 
 $ScriptDir = $PSScriptRoot
-$ClaudeConfigRepo = Join-Path $HOME 'development\claude\claude'
+$RepoRoot = Split-Path -Parent $ScriptDir
+$CommonDir = Join-Path $RepoRoot 'common'
 $BackupDir = Join-Path $HOME ".dotfiles-backup-$(Get-Date -Format yyyyMMdd-HHmmss)"
 # Honours a Documents folder redirected into OneDrive, which is where
 # PowerShell itself looks for profiles.
 $Documents = [Environment]::GetFolderPath('MyDocuments')
 $WindowsTerminalState = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState'
+# Windows Terminal derives the GUID of its generated PowerShell 7 profile from
+# the generator and profile name, so it is the same on every machine.
+$PwshProfileGuid = '{574e775e-4f2a-5b96-ac1e-a2962a402336}'
+$NerdFontFace = 'JetBrainsMono NF'
 
-# vsconfig\vs<year>-<product>.vsconfig -> the installer's version range and product id.
-$VsMajorByYear = @{ '2019' = 16; '2022' = 17; '2026' = 18 }
-$VsProductId = @{ 'community' = 'Community'; 'professional' = 'Professional'; 'enterprise' = 'Enterprise'; 'buildtools' = 'BuildTools' }
+# The cpp profile's Visual Studio: VS 2026 (installer major version 18) Community.
+$VsProductId = 'Microsoft.VisualStudio.Product.Community'
+$VsVersionRange = '[18.0,19.0)'
 
-$AllLayers = @('winget', 'vs', 'dotfiles', 'tooling', 'extensions')
+$AllLayers = @('packages', 'vs', 'dotfiles', 'tooling', 'extensions')
 $Layers = $AllLayers
 
 # --- Output helpers ----------------------------------------------------------
@@ -186,30 +199,84 @@ function Test-LinkedTo {
     return ((Get-NormalizedPath (Get-LinkTarget $Item)) -eq (Get-NormalizedPath $Source))
 }
 
+# Installers append to the machine and User PATH, which this process does not
+# see. Re-read both so later layers find what earlier ones installed.
+function Update-SessionPath {
+    $machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+    $user = [Environment]::GetEnvironmentVariable('Path', 'User')
+    $env:Path = (@($machine, $user) | Where-Object { $_ }) -join ';'
+}
+
+# --- Profiles ----------------------------------------------------------------
+
+# Every name that has a file in either half; core is implicit, never listed.
+function Get-AvailableProfiles {
+    $names = @()
+    foreach ($dir in @((Join-Path $ScriptDir 'profiles'), (Join-Path $CommonDir 'profiles'))) {
+        $names += @(Get-ChildItem -LiteralPath $dir -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Extension -eq '.txt' } | ForEach-Object { $_.BaseName.ToLowerInvariant() })
+    }
+    return ($names | Where-Object { $_ -ne 'core' } | Sort-Object -Unique)
+}
+
+$AvailableProfiles = @(Get-AvailableProfiles)
+
+# Entries of one kind across the selected profiles, deduplicated in order.
+#   winget, psmodule      windows\profiles\<name>.txt (a bare line is a winget id)
+#   vscode, go, npm, uv-python   ..\common\profiles\<name>.txt
+function Get-ProfileEntries {
+    param([string]$Kind)
+    $out = @()
+    foreach ($p in $SelectedProfiles) {
+        if ($Kind -eq 'winget' -or $Kind -eq 'psmodule') {
+            foreach ($e in @(Get-Entries (Join-Path $ScriptDir "profiles\$p.txt"))) {
+                $parts = $e -split ' ', 2
+                if ($Kind -eq 'psmodule' -and $parts[0] -eq 'psmodule' -and $parts.Count -eq 2) { $out += $parts[1] }
+                elseif ($Kind -eq 'winget' -and $parts.Count -eq 1) { $out += $parts[0] }
+            }
+        }
+        else {
+            foreach ($e in @(Get-Entries (Join-Path $CommonDir "profiles\$p.txt"))) {
+                $parts = $e -split ' ', 2
+                if ($parts.Count -eq 2 -and $parts[0] -eq $Kind) { $out += $parts[1] }
+            }
+        }
+    }
+    $seen = @{}
+    $unique = @()
+    foreach ($x in $out) {
+        $k = $x.ToLowerInvariant()
+        if (-not $seen.ContainsKey($k)) { $seen[$k] = $true; $unique += $x }
+    }
+    return $unique
+}
+
 # --- Argument parsing --------------------------------------------------------
 
 function Show-Usage {
     @"
 Usage: install.ps1 [options]
 
-  -Only  <layers>   Run only these layers (comma-separated).
-  -Skip  <layers>   Run every layer except these.
+  -Profile <names>  Add these profiles to core (comma-separated), or 'all'.
+  -Only    <layers> Run only these layers (comma-separated).
+  -Skip    <layers> Run every layer except these.
   -DryRun           Print every mutating command without running it.
   -Help             This message.
 
-Layers: $($AllLayers -join ', ')
+Profiles: $($AvailableProfiles -join ', ')
+Layers:   $($AllLayers -join ', ')
 "@ | Write-Host
 }
 
-function ConvertTo-LayerList {
-    param([string[]]$Raw)
+function ConvertTo-NameList {
+    param([string[]]$Raw, [string[]]$Valid, [string]$What)
     $out = @()
     foreach ($chunk in $Raw) {
         foreach ($name in ($chunk -split ',')) {
             $n = $name.Trim().ToLowerInvariant()
             if (-not $n) { continue }
-            if ($AllLayers -notcontains $n) {
-                Write-Err "Unknown layer '$n'. Valid: $($AllLayers -join ', ')"
+            if ($Valid -notcontains $n) {
+                Write-Err "Unknown $What '$n'. Valid: $($Valid -join ', ')"
                 exit 2
             }
             $out += $n
@@ -219,13 +286,18 @@ function ConvertTo-LayerList {
 }
 
 if ($Help) { Show-Usage; exit 0 }
-if ($Only) { $Layers = @(ConvertTo-LayerList $Only) }
+if ($Only) { $Layers = @(ConvertTo-NameList $Only $AllLayers 'layer') }
 if ($Skip) {
-    $skipping = @(ConvertTo-LayerList $Skip)
+    $skipping = @(ConvertTo-NameList $Skip $AllLayers 'layer')
     $Layers = @($Layers | Where-Object { $skipping -notcontains $_ })
 }
 # Always in canonical order, whatever order -Only listed them in.
 $Layers = @($AllLayers | Where-Object { $Layers -contains $_ })
+
+$requested = @()
+if ($Profiles) { $requested = @(ConvertTo-NameList $Profiles ($AvailableProfiles + @('all')) 'profile') }
+if ($requested -contains 'all') { $requested = $AvailableProfiles }
+$SelectedProfiles = @('core') + @($AvailableProfiles | Where-Object { $requested -contains $_ })
 
 function Wants { param([string]$Layer) return ($Layers -contains $Layer) }
 
@@ -270,9 +342,7 @@ function Invoke-Preflight {
     else {
         Write-Warn "git missing; installing Git.Git with winget."
         Run @('winget', 'install', '--id', 'Git.Git', '--exact', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity') | Out-Null
-        # The installer appends to the machine PATH; this process does not see that yet.
-        $gitCmd = Join-Path $env:ProgramFiles 'Git\cmd'
-        if (Test-Path -LiteralPath $gitCmd) { $env:Path = "$gitCmd;$env:Path" }
+        Update-SessionPath
         if (-not (Test-Command git) -and -not $DryRun) {
             Write-Err "git still not on PATH. Open a new shell and re-run."
             exit 1
@@ -280,9 +350,9 @@ function Invoke-Preflight {
     }
 }
 
-# --- Layer: winget -----------------------------------------------------------
+# --- Layer: packages ---------------------------------------------------------
 
-# What winget considers installed, keyed "id" (winget source) or "id source".
+# What winget considers installed, keyed by lower-case id.
 # `winget export` is the only view that is not a truncated fixed-width table.
 function Get-WingetInstalled {
     $tmp = Join-Path $env:TEMP "winget-export-$PID.json"
@@ -292,134 +362,89 @@ function Get-WingetInstalled {
     Remove-Item -LiteralPath $tmp -Force
     $keys = @()
     foreach ($source in @($json.Sources)) {
-        $sourceName = $source.SourceDetails.Name
-        foreach ($pkg in @($source.Packages)) {
-            if ($sourceName -eq 'winget') { $keys += $pkg.PackageIdentifier.ToLowerInvariant() }
-            else { $keys += "$($pkg.PackageIdentifier) $sourceName".ToLowerInvariant() }
-        }
+        foreach ($pkg in @($source.Packages)) { $keys += $pkg.PackageIdentifier.ToLowerInvariant() }
     }
     return $keys
 }
 
-function Invoke-LayerWinget {
+function Invoke-LayerPackages {
     Write-Step "winget packages"
 
-    # The snapshot is winget-only. Chocolatey and scoop once held duplicates of
-    # winget packages on the machine this was taken from; README.md has the
-    # one-time migration off them, and this nags until it has been run.
-    foreach ($other in @('choco', 'scoop')) {
-        if (Test-Command $other) {
-            Write-Warn "$other is installed but is not part of this snapshot; see 'Consolidated onto winget' in README.md."
-        }
+    $ids = @(Get-ProfileEntries 'winget')
+    if ($ids.Count -eq 0) {
+        Write-Info "No winget packages in the selected profiles."
+        return
     }
-
-    $list = Join-Path $ScriptDir 'winget-packages.txt'
-    $all = @(Get-Entries $list)
-    # A leading '-' marks a package that is installed on the source machine but
-    # deliberately not replayed; snapshot.ps1 knows the same convention.
-    $excluded = @($all | Where-Object { $_.StartsWith('-') })
-    $entries = @($all | Where-Object { -not $_.StartsWith('-') })
-    if ($entries.Count -eq 0) {
-        Write-Err "No entries in $list"
-        exit 1
-    }
-    $fromStore = @($entries | Where-Object { $_ -match '\s' }).Count
-    Write-Info "Applying winget-packages.txt: $($entries.Count) packages ($($entries.Count - $fromStore) winget, $fromStore msstore); $($excluded.Count) listed as deliberately not installed."
-
+    Write-Info "$($ids.Count) packages across: $($SelectedProfiles -join ', ')."
     Write-Info "Asking winget what is installed (winget export; read-only, takes a while)."
     $present = @(Get-WingetInstalled)
 
     $already = 0; $added = 0; $failed = 0
-    foreach ($entry in $entries) {
-        $parts = $entry -split ' '
-        $id = $parts[0]
-        $source = 'winget'
-        if ($parts.Count -gt 1) { $source = $parts[1] }
-
-        if ($present -contains $entry.ToLowerInvariant()) { $already++; continue }
-
+    foreach ($id in $ids) {
+        if ($present -contains $id.ToLowerInvariant()) { $already++; continue }
         # Installing a package winget already knows would upgrade it; the
         # presence check above is what keeps this a no-upgrade install.
-        $code = Run @('winget', 'install', '--id', $id, '--exact', '--source', $source,
+        $code = Run @('winget', 'install', '--id', $id, '--exact', '--source', 'winget',
             '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity')
         if ($code -eq 0) { $added++ } else { Write-Warn "  failed ($code): $id"; $failed++ }
     }
-    Write-Info "winget: $($entries.Count) listed, $already already present, $added installed, $failed failed."
+    Write-Info "winget: $($ids.Count) listed, $already already present, $added installed, $failed failed."
     if ($failed -gt 0) {
         Write-Warn "Failures are usually an installer that insists on a prompt, or an id that was renamed;"
-        Write-Warn "`winget search <name>` finds the current id."
+        Write-Warn "'winget search <name>' finds the current id."
     }
-    Write-Info "Visual Studio entries install the default workloads only; the vs layer adds the rest."
+    if ($added -gt 0 -and -not $DryRun) { Update-SessionPath }
 }
 
 # --- Layer: vs ---------------------------------------------------------------
 #
-# winget installs Visual Studio with its default workloads. vsconfig\ holds
-# the real component selection, exported per product by snapshot.ps1; the
-# installer's `modify --config` adds whatever is missing. vswhere -requires
-# answers "is every listed component present" without launching the installer.
+# winget installs Visual Studio with its default workloads. vsconfig\cpp.vsconfig
+# holds the curated C++ selection; the installer's `modify --config` adds
+# whatever is missing. vswhere -requires answers "is every listed component
+# present" without launching the installer.
 
 function Invoke-LayerVs {
     Write-Step "Visual Studio workloads"
 
+    if ($SelectedProfiles -notcontains 'cpp') {
+        Write-Info "The cpp profile is not selected; nothing to do."
+        return
+    }
     $installer = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer'
     $vswhere = Join-Path $installer 'vswhere.exe'
     $setup = Join-Path $installer 'setup.exe'
     if (-not ((Test-Path -LiteralPath $vswhere) -and (Test-Path -LiteralPath $setup))) {
-        Write-Warn "Visual Studio Installer not found; the winget layer installs Visual Studio."
-        Write-Warn "Re-run with -Only vs afterwards."
+        Write-Warn "Visual Studio Installer not found; the packages layer installs Visual Studio."
+        Write-Warn "Re-run with -Profile cpp -Only vs afterwards."
         return
     }
 
-    # Extension check rather than -Filter: under Windows PowerShell -Filter also
-    # matches editor backups like x.vsconfig~ through their 8.3 short names.
-    $configs = @(Get-ChildItem -LiteralPath (Join-Path $ScriptDir 'vsconfig') -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.Extension -eq '.vsconfig' })
-    if ($configs.Count -eq 0) {
-        Write-Info "No vsconfig\*.vsconfig files; nothing to do."
+    $installPath = (Invoke-Capture @($vswhere, '-products', $VsProductId, '-version', $VsVersionRange, '-property', 'installationPath')).Output | Select-Object -First 1
+    if (-not $installPath) {
+        Write-Warn "Visual Studio 2026 Community is not installed; the packages layer installs it."
         return
     }
 
-    foreach ($cfg in $configs) {
-        if ($cfg.BaseName -notmatch '^vs(\d{4})-([a-z]+)$') {
-            Write-Warn "$($cfg.Name): name is not vs<year>-<product>.vsconfig; skipped."
-            continue
-        }
-        $year = $Matches[1]; $productKey = $Matches[2]
-        if (-not $VsMajorByYear.ContainsKey($year) -or -not $VsProductId.ContainsKey($productKey)) {
-            Write-Warn "$($cfg.Name): unknown year or product; skipped."
-            continue
-        }
-        $major = $VsMajorByYear[$year]
-        $productId = "Microsoft.VisualStudio.Product.$($VsProductId[$productKey])"
-        $range = "[$major.0,$($major + 1).0)"
-
-        $installPath = (Invoke-Capture @($vswhere, '-products', $productId, '-version', $range, '-property', 'installationPath')).Output | Select-Object -First 1
-        if (-not $installPath) {
-            Write-Info "$($cfg.BaseName): product not installed; skipped (the winget layer installs it)."
-            continue
-        }
-
-        $components = @((Get-Content -LiteralPath $cfg.FullName -Raw | ConvertFrom-Json).components)
-        $query = @($vswhere, '-products', $productId, '-version', $range, '-requires') + $components + @('-property', 'installationPath')
-        $satisfied = (Invoke-Capture $query).Output | Select-Object -First 1
-        if ($satisfied) {
-            Write-Info "$($cfg.BaseName): all $($components.Count) components present."
-            continue
-        }
-
-        Write-Info "$($cfg.BaseName): adding missing components (the installer elevates itself and may prompt)."
-        $code = Run @($setup, 'modify', '--installPath', $installPath, '--config', $cfg.FullName, '--passive', '--norestart')
-        if ($code -ne 0) { Write-Warn "  setup.exe modify exited $code for $($cfg.BaseName)." }
+    $cfg = Join-Path $ScriptDir 'vsconfig\cpp.vsconfig'
+    $components = @((Get-Content -LiteralPath $cfg -Raw | ConvertFrom-Json).components)
+    $query = @($vswhere, '-products', $VsProductId, '-version', $VsVersionRange, '-requires') + $components + @('-property', 'installationPath')
+    $satisfied = (Invoke-Capture $query).Output | Select-Object -First 1
+    if ($satisfied) {
+        Write-Info "cpp.vsconfig: all $($components.Count) components present."
+        return
     }
+
+    Write-Info "cpp.vsconfig: adding missing components (the installer elevates itself and may prompt)."
+    $code = Run @($setup, 'modify', '--installPath', $installPath, '--config', $cfg, '--passive', '--norestart')
+    if ($code -ne 0) { Write-Warn "  setup.exe modify exited $code." }
 }
 
 # --- Layer: dotfiles ---------------------------------------------------------
 
 # Backups keep the path relative to $HOME (or the drive root when outside it),
-# so the two profile.ps1 files cannot collide in the flat backup directory.
+# so files with the same name cannot collide in the backup directory.
 function Backup-Path {
-    param([string]$Path)
+    param([string]$Path, [switch]$Copy)
     $full = [IO.Path]::GetFullPath($Path)
     $homeFull = [IO.Path]::GetFullPath($HOME).TrimEnd('\')
     if ($full.StartsWith($homeFull + '\', [StringComparison]::OrdinalIgnoreCase)) {
@@ -430,10 +455,11 @@ function Backup-Path {
     }
     $dest = Join-Path $BackupDir $rel
     Write-Info "Backing up $Path -> $dest"
-    RunBlock "Move $Path -> $dest" {
+    RunBlock "$(if ($Copy) { 'Copy' } else { 'Move' }) $Path -> $dest" {
         $parent = Split-Path -Parent $dest
         if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-        Move-Item -LiteralPath $Path -Destination $dest -Force
+        if ($Copy) { Copy-Item -LiteralPath $Path -Destination $dest -Force }
+        else { Move-Item -LiteralPath $Path -Destination $dest -Force }
     }
 }
 
@@ -458,80 +484,92 @@ function New-FileLink {
     else { Write-Err "mklink failed ($code) for $Target" }
 }
 
-function New-DirectoryLink {
-    param([string]$Source, [string]$Target)
-
-    $item = Get-Item -LiteralPath $Target -Force -ErrorAction SilentlyContinue
-    if (Test-LinkedTo -Item $item -Source $Source -LinkTypes @('Junction', 'SymbolicLink')) {
-        Write-Info "$(Split-Path -Leaf $Target) already linked."
+# Sets Windows Terminal's default profile to PowerShell 7 and its font to the
+# Nerd Font, inside whatever settings.json the machine already has. Terminal
+# writes every machine's generated profiles into that file, so it is merged
+# rather than linked: a linked copy would carry one machine's profiles into
+# the repo.
+function Set-TerminalDefaults {
+    $settings = Join-Path $WindowsTerminalState 'settings.json'
+    if (-not (Test-Path -LiteralPath $settings)) {
+        Write-Warn "Windows Terminal has not been launched yet (no settings.json); launch it once, then re-run -Only dotfiles."
         return
     }
-    if ($null -ne $item) { Backup-Path $Target }
+    try { $json = Get-Content -LiteralPath $settings -Raw | ConvertFrom-Json }
+    catch {
+        Write-Warn "Windows Terminal settings.json is not plain JSON (comments?); set the default profile to PowerShell"
+        Write-Warn "and the font to '$NerdFontFace' in Terminal's Settings instead."
+        return
+    }
+    $profilesProp = $json.PSObject.Properties['profiles']
+    if ($null -eq $profilesProp -or $profilesProp.Value -is [array]) {
+        Write-Warn "Windows Terminal settings.json uses an old layout; set the default profile and font in Terminal's Settings."
+        return
+    }
 
-    $parent = Split-Path -Parent $Target
-    if (-not (Test-Path -LiteralPath $parent)) {
-        RunBlock "New-Item -ItemType Directory $parent" { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+    $changes = @()
+    $current = $json.PSObject.Properties['defaultProfile']
+    if ($null -eq $current -or $current.Value -ne $PwshProfileGuid) { $changes += 'default profile -> PowerShell' }
+
+    $prof = $profilesProp.Value
+    $defaults = $null; $font = $null; $face = $null
+    if ($prof.PSObject.Properties['defaults']) { $defaults = $prof.defaults }
+    if ($defaults -and $defaults.PSObject.Properties['font']) { $font = $defaults.font }
+    if ($font -and $font.PSObject.Properties['face']) { $face = $font.face }
+    if ($face -ne $NerdFontFace) { $changes += "font -> $NerdFontFace" }
+
+    if ($changes.Count -eq 0) {
+        Write-Info "Windows Terminal already defaults to PowerShell with $NerdFontFace."
+        return
     }
-    RunBlock "New-Item -ItemType Junction $Target -> $Source" {
-        New-Item -ItemType Junction -Path $Target -Target $Source | Out-Null
+    Backup-Path $settings -Copy
+    RunBlock "Windows Terminal settings.json: $($changes -join ', ')" {
+        if ($null -eq $current) { $json | Add-Member -NotePropertyName defaultProfile -NotePropertyValue $PwshProfileGuid }
+        else { $json.defaultProfile = $PwshProfileGuid }
+        if ($null -eq $defaults) { $defaults = New-Object psobject; $prof | Add-Member -NotePropertyName defaults -NotePropertyValue $defaults }
+        if ($null -eq $font) { $font = New-Object psobject; $defaults | Add-Member -NotePropertyName font -NotePropertyValue $font }
+        if ($font.PSObject.Properties['face']) { $font.face = $NerdFontFace }
+        else { $font | Add-Member -NotePropertyName face -NotePropertyValue $NerdFontFace }
+        $text = $json | ConvertTo-Json -Depth 32
+        [IO.File]::WriteAllText($settings, $text, (New-Object System.Text.UTF8Encoding($false)))
     }
-    Write-Info "Linked $Target -> $Source (junction)"
+    Write-Info "Windows Terminal: $($changes -join ', ')."
 }
 
 function Invoke-LayerDotfiles {
     Write-Step "Dotfiles"
 
-    $d = Join-Path $ScriptDir 'dotfiles'
-    if (-not (Test-Path -LiteralPath $d)) {
-        Write-Err "dotfiles\ not found at $d"
-        exit 1
-    }
-
-    # Directory links never need a privilege.
-    New-DirectoryLink (Join-Path $d 'git-global-hooks') (Join-Path $HOME '.git-global-hooks')
-
     if (Test-SymlinkAbility) {
-        New-FileLink (Join-Path $d 'gitconfig')           (Join-Path $HOME '.gitconfig')
-        New-FileLink (Join-Path $d 'config\git\ignore')   (Join-Path $HOME '.config\git\ignore')
-        New-FileLink (Join-Path $d 'config\starship.toml') (Join-Path $HOME '.config\starship.toml')
-        New-FileLink (Join-Path $d 'bashrc')              (Join-Path $HOME '.bashrc')
-        New-FileLink (Join-Path $d 'profile')             (Join-Path $HOME '.profile')
-        New-FileLink (Join-Path $d 'condarc')             (Join-Path $HOME '.condarc')
-
-        # PowerShell 7 reads Documents\PowerShell, Windows PowerShell 5.1 reads
-        # Documents\WindowsPowerShell; profile.ps1 is all-hosts, the other file
-        # console-host only. shell-ux.ps1 is found via $PSScriptRoot, which is
-        # the directory of the link, so it must be linked alongside.
-        $pwshDir = Join-Path $Documents 'PowerShell'
-        foreach ($name in @('profile.ps1', 'Microsoft.PowerShell_profile.ps1', 'shell-ux.ps1')) {
-            New-FileLink (Join-Path (Join-Path $d 'powershell') $name) (Join-Path $pwshDir $name)
-        }
-        $wpsDir = Join-Path $Documents 'WindowsPowerShell'
-        foreach ($name in @('profile.ps1', 'Microsoft.PowerShell_profile.ps1')) {
-            New-FileLink (Join-Path (Join-Path $d 'windowspowershell') $name) (Join-Path $wpsDir $name)
-        }
-
-        # Windows Terminal creates LocalState on first launch; before that there
-        # is nowhere to put the link.
-        if (Test-Path -LiteralPath $WindowsTerminalState) {
-            New-FileLink (Join-Path $d 'windows-terminal\settings.json') (Join-Path $WindowsTerminalState 'settings.json')
+        $git = Join-Path $CommonDir 'git'
+        New-FileLink (Join-Path $git 'gitconfig')               (Join-Path $HOME '.gitconfig')
+        New-FileLink (Join-Path $git 'ignore')                  (Join-Path $HOME '.config\git\ignore')
+        if (Test-Command delta) {
+            New-FileLink (Join-Path $git 'delta.gitconfig')     (Join-Path $HOME '.config\git\delta.gitconfig')
         }
         else {
-            Write-Warn "Windows Terminal has never been launched (no LocalState folder); skipping its settings.json."
-            Write-Warn "Launch it once, then re-run with -Only dotfiles."
+            Write-Info "delta not on PATH; git keeps its default pager. Re-run -Only dotfiles once it is installed."
+        }
+        New-FileLink (Join-Path $CommonDir 'starship.toml')     (Join-Path $HOME '.config\starship.toml')
+
+        # profile.ps1 is PowerShell 7's all-hosts profile. shell-ux.ps1 is found
+        # through $PSScriptRoot, the directory of the link, so it is linked
+        # alongside. Windows PowerShell 5.1 is left with its own profile.
+        $pwshDir = Join-Path $Documents 'PowerShell'
+        foreach ($name in @('profile.ps1', 'shell-ux.ps1')) {
+            New-FileLink (Join-Path $ScriptDir "dotfiles\powershell\$name") (Join-Path $pwshDir $name)
         }
     }
     else {
         Write-Err "This shell cannot create file symlinks: it is not elevated and Developer Mode is off."
         Write-Err "Turn on Settings > System > For developers > Developer Mode (or open an elevated"
         Write-Err "shell), then re-run with: .\install.ps1 -Only dotfiles"
-        Write-Err "Skipped: .gitconfig, .config\git\ignore, starship.toml, .bashrc, .profile, .condarc,"
-        Write-Err "both PowerShell profiles, Windows Terminal settings.json."
     }
 
-    # These are machine-local by design: a personal identity, a work identity,
-    # and per-machine env do not belong in a portable snapshot. All optional:
-    # git ignores a missing include, both profiles guard their dot-source.
+    Set-TerminalDefaults
+
+    # Machine-local by design: identity, a work identity and per-machine env do
+    # not belong in a shared baseline. All optional: git ignores a missing
+    # include, profile.ps1 guards its dot-source.
     if (Test-Path -LiteralPath (Join-Path $HOME '.gitconfig-local')) {
         Write-Info "~\.gitconfig-local present (machine-local, not managed here)."
     }
@@ -539,43 +577,26 @@ function Invoke-LayerDotfiles {
         Write-Warn "No ~\.gitconfig-local. Git has no identity, so commits will fail with"
         Write-Warn "  'unable to auto-detect email address'. Create it with:"
         Write-Host '    "[user]`n`tname = NAME`n`temail = EMAIL" | Set-Content ~\.gitconfig-local'
-        Write-Warn "  then `gh auth setup-git`, which writes its credential helper into ~\.gitconfig:"
+        Write-Warn "  then 'gh auth setup-git', which writes its credential helper into ~\.gitconfig:"
         Write-Warn "  move that block into ~\.gitconfig-local too."
     }
     if (Test-Path -LiteralPath (Join-Path $HOME '.gitconfig-work')) {
         Write-Info "~\.gitconfig-work present (machine-local, not managed here)."
     }
     else {
-        Write-Info "No ~\.gitconfig-work; ~\development\work\ repos use the default git identity."
+        Write-Info "No ~\.gitconfig-work; repos under ~\work\ or ~\development\work\ use the default identity."
     }
     if (Test-Path -LiteralPath (Join-Path $HOME '.powershell.local.ps1')) {
         Write-Info "~\.powershell.local.ps1 present (machine-local, not managed here)."
     }
     else {
-        Write-Info "No ~\.powershell.local.ps1; add one for per-machine env both PowerShell profiles should load."
-    }
-    if (Test-Path -LiteralPath (Join-Path $HOME '.bashrc.local')) {
-        Write-Info "~\.bashrc.local present (machine-local, not managed here)."
-    }
-    else {
-        Write-Info "No ~\.bashrc.local; add one for per-machine env Git Bash should load."
-    }
-
-    # ~\.claude\scripts reads GEMINI_API_KEY. The value is a secret and is
-    # deliberately absent from this repo; the User environment is where the
-    # profiles expect it.
-    if ([Environment]::GetEnvironmentVariable('GEMINI_API_KEY', 'User')) {
-        Write-Info "GEMINI_API_KEY is set in the User environment."
-    }
-    else {
-        Write-Warn "GEMINI_API_KEY is not in the User environment; ~\.claude\scripts\ask_cheap.py will fail. Set it with:"
-        Write-Host "    [Environment]::SetEnvironmentVariable('GEMINI_API_KEY', '<value>', 'User')"
+        Write-Info "No ~\.powershell.local.ps1; add one for per-machine shell setup and secrets."
     }
 }
 
 # --- Layer: tooling ----------------------------------------------------------
 
-# golang.org/x/tools/gopls -> gopls; github.com/sigstore/cosign/v2/cmd/cosign -> cosign.
+# golang.org/x/tools/gopls -> gopls; .../golangci-lint/v2/cmd/golangci-lint -> golangci-lint.
 function Get-GoBinaryName {
     param([string]$Module)
     $path = ($Module -split '@')[0]
@@ -586,154 +607,123 @@ function Get-GoBinaryName {
 }
 
 function Invoke-LayerTooling {
-    Write-Step "Go tools, npm globals, dotnet tools, PowerShell modules, ~\.claude"
-
-    $entries = @(Get-Entries (Join-Path $ScriptDir 'tools.txt'))
-    $byKind = @{ go = @(); npm = @(); dotnet = @(); psmodule = @() }
-    foreach ($entry in $entries) {
-        $parts = $entry -split ' ', 2
-        if ($parts.Count -ne 2 -or -not $byKind.ContainsKey($parts[0])) {
-            Write-Warn "tools.txt: cannot parse '$entry'; skipped."
-            continue
-        }
-        $byKind[$parts[0]] += $parts[1]
-    }
-
-    if (Test-Command go) {
-        $goBin = Join-Path ((Invoke-Capture @('go', 'env', 'GOPATH')).Output | Select-Object -First 1) 'bin'
-        foreach ($module in $byKind['go']) {
-            $exe = Join-Path $goBin "$(Get-GoBinaryName $module).exe"
-            if (Test-Path -LiteralPath $exe) { Write-Info "$(Get-GoBinaryName $module) already installed." }
-            else {
-                Write-Info "go install $module"
-                Run @('go', 'install', $module) | Out-Null
-            }
-        }
-    }
-    elseif ($byKind['go'].Count -gt 0) {
-        Write-Warn "go not on PATH; skipping Go tools. Run the winget layer first."
-    }
-
-    if (Test-Command npm) {
-        $present = @()
-        $json = (Invoke-Capture @('npm', 'ls', '-g', '--depth=0', '--json')).Output -join "`n"
-        if ($json.Trim()) {
-            $tree = $json | ConvertFrom-Json
-            if ($tree.PSObject.Properties['dependencies']) { $present = @($tree.dependencies.PSObject.Properties.Name) }
-        }
-        foreach ($pkg in $byKind['npm']) {
-            if ($present -contains $pkg) { Write-Info "npm: $pkg already installed." }
-            else {
-                Write-Info "npm install -g $pkg"
-                Run @('npm', 'install', '-g', $pkg) | Out-Null
-            }
-        }
-    }
-    elseif ($byKind['npm'].Count -gt 0) {
-        Write-Warn "npm not on PATH; skipping npm globals. Run the winget layer first."
-    }
-
-    if (Test-Command dotnet) {
-        $present = @()
-        foreach ($row in (Invoke-Capture @('dotnet', 'tool', 'list', '-g')).Output) {
-            if ($row -match '^(Package Id|-+)') { continue }
-            if ($row -match '^(\S+)\s+\S+') { $present += $Matches[1].ToLowerInvariant() }
-        }
-        foreach ($id in $byKind['dotnet']) {
-            if ($present -contains $id.ToLowerInvariant()) { Write-Info "dotnet tool $id already installed." }
-            else {
-                Write-Info "dotnet tool install -g $id"
-                Run @('dotnet', 'tool', 'install', '-g', $id) | Out-Null
-            }
-        }
-    }
-    elseif ($byKind['dotnet'].Count -gt 0) {
-        Write-Warn "dotnet not on PATH; skipping dotnet tools. Run the winget layer first."
-    }
+    Write-Step "PowerShell modules, Go tools, npm globals, uv Pythons"
 
     # Installed from inside pwsh 7 so they land on its module path; the user
     # module path of Windows PowerShell is invisible to pwsh.
-    if (Test-Command pwsh) {
-        $present = @((Invoke-Capture @('pwsh', '-NoProfile', '-NonInteractive', '-Command',
-            'Get-InstalledPSResource -Scope CurrentUser | Select-Object -ExpandProperty Name')).Output |
-            ForEach-Object { $_.ToLowerInvariant() })
-        foreach ($name in $byKind['psmodule']) {
-            if ($present -contains $name.ToLowerInvariant()) { Write-Info "PowerShell module $name already installed." }
-            else {
-                Write-Info "Install-PSResource $name (in pwsh)"
-                Run @('pwsh', '-NoProfile', '-NonInteractive', '-Command',
-                    "Install-PSResource -Name '$name' -Scope CurrentUser -Repository PSGallery -TrustRepository -Quiet") | Out-Null
+    $modules = @(Get-ProfileEntries 'psmodule')
+    if ($modules.Count -gt 0) {
+        if (Test-Command pwsh) {
+            $present = @((Invoke-Capture @('pwsh', '-NoProfile', '-NonInteractive', '-Command',
+                'Get-InstalledPSResource -Scope CurrentUser | Select-Object -ExpandProperty Name')).Output |
+                ForEach-Object { $_.ToLowerInvariant() })
+            foreach ($name in $modules) {
+                if ($present -contains $name.ToLowerInvariant()) { Write-Info "PowerShell module $name already installed." }
+                else {
+                    Write-Info "Install-PSResource $name (in pwsh)"
+                    Run @('pwsh', '-NoProfile', '-NonInteractive', '-Command',
+                        "Install-PSResource -Name '$name' -Scope CurrentUser -Repository PSGallery -TrustRepository -Quiet") | Out-Null
+                }
             }
         }
-    }
-    elseif ($byKind['psmodule'].Count -gt 0) {
-        Write-Warn "pwsh not on PATH; skipping PowerShell modules. Run the winget layer first."
+        else { Write-Warn "pwsh not on PATH; skipping PowerShell modules. Run the packages layer first." }
     }
 
-    # ~\.claude is a junction to the config repo: the whole directory, runtime
-    # state included, unlike the four per-directory links on macOS. See
-    # ~\.claude\CLAUDE.md.
-    $claudeDir = Join-Path $HOME '.claude'
-    if (Test-Path -LiteralPath $ClaudeConfigRepo) {
-        New-DirectoryLink $ClaudeConfigRepo $claudeDir
+    $goModules = @(Get-ProfileEntries 'go')
+    if ($goModules.Count -gt 0) {
+        if (Test-Command go) {
+            $goBin = Join-Path ((Invoke-Capture @('go', 'env', 'GOPATH')).Output | Select-Object -First 1) 'bin'
+            foreach ($module in $goModules) {
+                $name = Get-GoBinaryName $module
+                if (Test-Path -LiteralPath (Join-Path $goBin "$name.exe")) { Write-Info "$name already installed." }
+                else {
+                    Write-Info "go install $module"
+                    Run @('go', 'install', $module) | Out-Null
+                }
+            }
+        }
+        else { Write-Warn "go not on PATH; skipping Go tools. Run the packages layer first." }
     }
-    else {
-        Write-Warn "Claude config repo not found at $ClaudeConfigRepo."
-        Write-Warn "Clone it, then re-run with -Only tooling:"
-        Write-Host "    git clone git@github.com:shaia/claude.git $ClaudeConfigRepo"
+
+    $npmPackages = @(Get-ProfileEntries 'npm')
+    if ($npmPackages.Count -gt 0) {
+        if (Test-Command npm) {
+            $present = @()
+            $json = (Invoke-Capture @('npm', 'ls', '-g', '--depth=0', '--json')).Output -join "`n"
+            if ($json.Trim()) {
+                $tree = $json | ConvertFrom-Json
+                if ($tree.PSObject.Properties['dependencies']) { $present = @($tree.dependencies.PSObject.Properties.Name) }
+            }
+            foreach ($pkg in $npmPackages) {
+                if ($present -contains $pkg) { Write-Info "npm: $pkg already installed." }
+                else {
+                    Write-Info "npm install -g $pkg"
+                    Run @('npm', 'install', '-g', $pkg) | Out-Null
+                }
+            }
+        }
+        else { Write-Warn "npm not on PATH; skipping npm globals. Run the packages layer first." }
+    }
+
+    $pythons = @(Get-ProfileEntries 'uv-python')
+    if ($pythons.Count -gt 0) {
+        if (Test-Command uv) {
+            $installed = @((Invoke-Capture @('uv', 'python', 'list', '--only-installed')).Output)
+            foreach ($v in $pythons) {
+                if (@($installed | Where-Object { $_ -match "^cpython-$([regex]::Escape($v))\." }).Count -gt 0) {
+                    Write-Info "Python $v already installed."
+                }
+                else {
+                    Write-Info "uv python install $v"
+                    Run @('uv', 'python', 'install', $v) | Out-Null
+                }
+            }
+        }
+        else { Write-Warn "uv not on PATH; skipping Python. Run the packages layer first." }
     }
 
     Write-Step "Manual steps this script deliberately leaves to you"
-    Write-Host "  gh auth login          # writes credential.helper into ~\.gitconfig, which is a"
-    Write-Host "                         # symlink into this repo - move what it adds into"
-    Write-Host "                         # ~\.gitconfig-local so the tracked file stays portable"
-    Write-Host "  wsl --install -d Ubuntu  # elevated; enables the Windows features and reboots"
-    Write-Host "  Docker Desktop         # first launch provisions the docker-desktop WSL distro"
+    Write-Host "  gh auth login          # then move what it writes into ~\.gitconfig (a link into"
+    Write-Host "                         # this repo) over to ~\.gitconfig-local"
+    Write-Host "  ~\.gitconfig-local     # your git identity; see the dotfiles layer's message"
+    Write-Host "  ssh keys               # not in this repo; generate or restore your own"
     Write-Host "  Developer Mode         # Settings > System > For developers; symlinks without elevation"
-    Write-Host "  ssh keys               # not in this repo; restore from your own backup, along with"
-    Write-Host "                         # the ~\.ssh\config host alias ~\.gitconfig-local may rewrite to"
-    Write-Host "  JetBrains Toolbox      # installs its IDEs itself; winget only installs the Toolbox"
-    Write-Host "  rustup, uv, conda      # rustup-init installs stable; extra toolchains, uv-managed"
-    Write-Host "                         # Pythons and conda envs are per-project, not snapshotted"
+    Write-Host "  Docker Desktop         # containers profile: launch once; it provisions its WSL distro"
+    Write-Host "  devshell               # cpp profile: run in pwsh to put MSVC on PATH for that session"
 }
 
 # --- Layer: extensions -------------------------------------------------------
 
-function Install-Extensions {
-    param([string]$Cmd, [string]$List, [string]$Label)
+function Invoke-LayerExtensions {
+    Write-Step "VS Code extensions"
 
-    if (-not (Test-Command $Cmd)) {
-        Write-Warn "$Label CLI ('$Cmd') not on PATH; skipping. Open a new shell after the winget layer, or launch the app once."
+    $ids = @(Get-ProfileEntries 'vscode')
+    if ($ids.Count -eq 0) {
+        Write-Info "No extensions in the selected profiles."
         return
     }
-    if (-not (Test-Path -LiteralPath $List)) {
-        Write-Warn "$List not found; skipping $Label extensions."
+    if (-not (Test-Command 'code')) {
+        Write-Warn "VS Code CLI ('code') not on PATH; skipping. Open a new shell after the packages layer."
         return
     }
 
-    # One listing up front, so a re-run costs one call instead of ~90.
-    $present = @((Invoke-Capture @($Cmd, '--list-extensions')).Output | ForEach-Object { $_.ToLowerInvariant() })
+    # One listing up front, so a re-run costs one call instead of one per extension.
+    $present = @((Invoke-Capture @('code', '--list-extensions')).Output | ForEach-Object { $_.ToLowerInvariant() })
 
-    $total = 0; $already = 0; $added = 0; $failed = 0
-    foreach ($id in @(Get-Entries $List)) {
-        $total++
+    $already = 0; $added = 0; $failed = 0
+    foreach ($id in $ids) {
         if ($present -contains $id.ToLowerInvariant()) { $already++; continue }
         if ($DryRun) {
-            Write-Host "  + $Cmd --install-extension $id --force"
+            Write-Host "  + code --install-extension $id"
             $added++
             continue
         }
-        $r = Invoke-Capture @($Cmd, '--install-extension', $id, '--force')
+        $r = Invoke-Capture @('code', '--install-extension', $id)
         if ($r.ExitCode -eq 0) { Write-Host "  installed $id"; $added++ }
         else { Write-Warn "  failed: $id"; $failed++ }
     }
-    Write-Info "${Label}: $total listed, $already already present, $added installed, $failed failed."
-    if ($failed -gt 0) { Write-Warn "${Label}: failures are usually extensions that were unpublished or renamed." }
-}
-
-function Invoke-LayerExtensions {
-    Write-Step "Editor extensions"
-    Install-Extensions -Cmd 'code' -List (Join-Path $ScriptDir 'vscode-extensions.txt') -Label 'VS Code'
+    Write-Info "VS Code: $($ids.Count) listed, $already already present, $added installed, $failed failed."
+    if ($failed -gt 0) { Write-Warn "Failures are usually extensions that were unpublished or renamed." }
 }
 
 # --- Main --------------------------------------------------------------------
@@ -744,11 +734,15 @@ function Invoke-Main {
     }
     $layerText = $Layers -join ' '
     if (-not $layerText) { $layerText = 'none' }
+    Write-Info "Profiles: $($SelectedProfiles -join ' ')"
+    if ($SelectedProfiles.Count -eq 1) {
+        Write-Info "  Core only. Add any of these with -Profile: $($AvailableProfiles -join ', ')"
+    }
     Write-Info "Layers: $layerText"
 
     Invoke-Preflight
 
-    if (Wants 'winget')     { Invoke-LayerWinget }
+    if (Wants 'packages')   { Invoke-LayerPackages }
     if (Wants 'vs')         { Invoke-LayerVs }
     if (Wants 'dotfiles')   { Invoke-LayerDotfiles }
     if (Wants 'tooling')    { Invoke-LayerTooling }
@@ -756,7 +750,7 @@ function Invoke-Main {
 
     Write-Step "Done"
     if (Test-Path -LiteralPath $BackupDir) {
-        Write-Info "Replaced dotfiles were backed up to $BackupDir"
+        Write-Info "Replaced files were backed up to $BackupDir"
     }
     Write-Info "Open a new terminal: installers append to PATH, and this shell cannot see that."
 }

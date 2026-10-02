@@ -1,0 +1,11 @@
+# C and C++: MSVC through Visual Studio, plus clang, CMake, Ninja and make.
+#
+# winget package ids, one per line, installed with `winget install --id <id> --exact`
+# unless already installed. The cross-platform half of this profile is
+# common/profiles/cpp.txt.
+
+Microsoft.VisualStudio.Community  # VS 2026; the vs layer then applies vsconfig/cpp.vsconfig
+Kitware.CMake
+LLVM.LLVM                         # standalone clang, clangd, clang-format, lldb
+Ninja-build.Ninja
+ezwinports.make                   # GNU make, for projects that ship a Makefile

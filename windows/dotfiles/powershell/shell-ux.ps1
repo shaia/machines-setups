@@ -6,19 +6,15 @@
 # ORDER IS LOAD-BEARING. Starship must be initialised LAST: it defines the `prompt`
 # function, and posh-git also defines one on import. Last writer wins.
 #
-# NOTE: Microsoft.PowerShell_profile.ps1 contains a coreutils block that rewrites ~85
-# command names (ls, la, cat, grep, find, rm, cp, sort, head, tail, date, sleep, test,
-# pwd, ...) at the PSReadLine layer. Do NOT define aliases for any of those names here --
-# the rewriter fires first and the alias would silently never run.
+# Requires (all from the core profile): starship, zoxide, fzf, and the PSReadLine,
+# posh-git, PSFzf and CompletionPredictor modules. Each piece degrades to nothing
+# when its tool is missing.
 
 # --- bail out for non-interactive sessions -----------------------------------
 # Nothing below is useful to a script runner, and it all costs startup time.
 $__cmdline = [Environment]::GetCommandLineArgs()
 if ($__cmdline -contains '-NonInteractive' -or $__cmdline -contains '-noni') { return }
 if ($Host.Name -notin 'ConsoleHost', 'Visual Studio Code Host') { return }
-
-# Keep starship.toml on OneDrive instead of ~\.config (uncomment to sync it):
-# $env:STARSHIP_CONFIG = Join-Path $PSScriptRoot 'starship.toml'
 
 
 # --- PSReadLine: fish-style suggestions, history search, syntax colours ------
@@ -121,7 +117,7 @@ if (Get-Command fzf -ErrorAction SilentlyContinue) {
 
 
 # --- zoxide: the `z` plugin ---------------------------------------------------
-# `z rush` jumps to the most-used directory matching "rush"; `zi` picks interactively.
+# `z api` jumps to the most-used directory matching "api"; `zi` picks interactively.
 # Default --cmd, so plain `cd` keeps its normal behaviour.
 if (Get-Command zoxide -ErrorAction SilentlyContinue) {
     Invoke-Expression (& { (zoxide init powershell | Out-String) })
@@ -129,7 +125,6 @@ if (Get-Command zoxide -ErrorAction SilentlyContinue) {
 
 
 # --- aliases ------------------------------------------------------------------
-# Deliberately avoids every name the coreutils rewriter claims (see header).
 # `gp` is the one intentional override of a built-in alias (was Get-ItemProperty).
 
 Set-Alias -Name g -Value git
@@ -172,7 +167,4 @@ function reload { . $PROFILE.CurrentUserAllHosts; . $PROFILE.CurrentUserCurrentH
 if (Get-Command starship -ErrorAction SilentlyContinue) {
     $env:STARSHIP_SHELL = 'powershell'
     Invoke-Expression (&starship init powershell)
-    # Transient prompt is deliberately NOT enabled: it installs its own PSReadLine
-    # Enter handler, and the coreutils block already owns PSConsoleHostReadLine.
-    # Enable-TransientPrompt
 }

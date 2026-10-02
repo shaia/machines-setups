@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "components": [
+    "Microsoft.VisualStudio.Workload.NativeDesktop",
+    "Microsoft.VisualStudio.ComponentGroup.NativeDesktop.Core",
+    "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+    "Microsoft.VisualStudio.Component.VC.CMake.Project",
+    "Microsoft.VisualStudio.Component.VC.Llvm.Clang",
+    "Microsoft.VisualStudio.Component.VC.Llvm.ClangToolset",
+    "Microsoft.VisualStudio.Component.VC.ASAN",
+    "Microsoft.VisualStudio.Component.Vcpkg",
+    "Microsoft.VisualStudio.Component.Windows11SDK.26100"
+  ],
+  "extensions": []
+}
