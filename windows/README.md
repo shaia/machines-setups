@@ -28,8 +28,10 @@ shell is elevated, and whether Developer Mode is on. Then six layers run:
 | `tooling` | PowerShell modules into pwsh 7, `go install` tools, npm globals, `uv python install`, `uv tool install` |
 | `extensions` | VS Code extensions from `common\profiles\` |
 
-The packages layer re-reads PATH from the registry after it installs anything,
-so later layers in the same run find the new tools.
+Preflight, and the packages layer after it installs anything, merge the PATH
+stored in the registry into the running shell. A re-run from a window opened
+before an earlier install still finds uv, go and npm, and later layers in the
+same run find what earlier ones installed.
 
 ## Things worth knowing
 

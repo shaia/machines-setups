@@ -279,10 +279,27 @@ function Test-LinkedTo {
 
 # Installers append to the machine and User PATH, which this process does not
 # see. Re-read both so later layers find what earlier ones installed.
+# Merges rather than replaces: entries this process already has (a Visual
+# Studio developer shell, a CI tool cache) stay, and registry entries it
+# lacks are appended.
 function Update-SessionPath {
-    $machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
-    $user = [Environment]::GetEnvironmentVariable('Path', 'User')
-    $env:Path = (@($machine, $user) | Where-Object { $_ }) -join ';'
+    $current = @($env:Path -split ';' | Where-Object { $_ })
+    $known = @{}
+    foreach ($e in $current) { $known[$e.TrimEnd('\').ToLowerInvariant()] = $true }
+    $added = @()
+    foreach ($scope in @('Machine', 'User')) {
+        $value = [Environment]::GetEnvironmentVariable('Path', $scope)
+        if (-not $value) { continue }
+        foreach ($raw in ($value -split ';')) {
+            if (-not $raw) { continue }
+            # The registry keeps some entries unexpanded (%USERPROFILE%\...);
+            # the session has them expanded, so compare the expanded form.
+            $e = [Environment]::ExpandEnvironmentVariables($raw)
+            $key = $e.TrimEnd('\').ToLowerInvariant()
+            if (-not $known.ContainsKey($key)) { $known[$key] = $true; $added += $e }
+        }
+    }
+    $env:Path = (@($current) + @($added)) -join ';'
 }
 
 # --- Profiles ----------------------------------------------------------------
@@ -409,6 +426,11 @@ $script:DeveloperMode = $false
 
 function Invoke-Preflight {
     Write-Step "Preflight"
+
+    # A shell opened before an earlier run installed things has a stale PATH;
+    # without this, a re-run from it cannot see uv, go or npm and skips their
+    # steps.
+    Update-SessionPath
 
     if ($env:OS -ne 'Windows_NT') {
         Write-Err "Windows only; this is $env:OS."
