@@ -101,9 +101,12 @@ needs registering. To add a tool to an existing profile, add one line.
 - **Git that does not surprise you.** Pulls are fast-forward only, deleted
   remote branches are pruned, rerere and zdiff3 conflict markers are on, and
   `main` is the default branch.
-- **Windows settings a build depends on.** Explorer shows file extensions, and
-  long paths are on in both Windows and git, so deep build trees do not fail at
-  260 characters.
+- **Windows settings a developer wants.** Explorer shows file extensions,
+  hidden files and the full path. The taskbar offers End Task, and Start search
+  stays local. Long paths are on in both Windows and git, so deep build trees
+  do not fail at 260 characters. Developer Mode and Windows' own inline `sudo`
+  are on. Taste and security-posture settings (dark mode, Do Not Disturb,
+  Remote Desktop, Edge policies) are left alone.
 - **Nothing elevates itself, and nothing is upgraded.** Package installs skip
   anything already present, and every layer is safe to re-run.
 
@@ -119,6 +122,28 @@ needs registering. To add a tool to an existing profile, add one line.
 - **Dotfiles are symlinked, not copied.** Editing `~/.gitconfig` or the shell
   profile edits this repo. Anything a linked file replaces is backed up first
   to `~/.dotfiles-backup-<timestamp>`.
+- **Check, apply, check again.** Every step is checked before it runs and
+  re-checked after, so a change that did not stick is reported as a failure
+  rather than trusted. The run ends with a summary:
+
+  | Status | Means |
+  | --- | --- |
+  | already fine | Nothing needed doing |
+  | changed | Applied, and the re-check confirmed it |
+  | failed | Applied, but the re-check still fails. The script exits 1 |
+  | flagged | Best-effort work that could not be done here (no virtualization for WSL, Terminal never launched). The run continues |
+  | manual | Needs something the script deliberately does not do, such as elevation. The commands are printed together at the end |
+
+  A second run on a configured machine reports nothing changed.
+- **Retries, one run at a time, and a log.** Network installs retry twice,
+  after 5 and 15 seconds. A second copy started while one runs exits with
+  code 3. Every run, dry runs included, is logged to
+  `~/.machines-setups/logs/install-<timestamp>.log`.
+- **Tested on clean machines.** [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
+  runs both installers on fresh GitHub-hosted Windows and macOS runners, on
+  every push, every pull request and weekly. Each job installs core plus go,
+  python and web, runs a second time and requires it to change nothing, then
+  checks the toolchains from a fresh shell.
 
 ## Secrets and personal config
 

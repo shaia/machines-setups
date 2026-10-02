@@ -24,6 +24,18 @@ Homebrew if it is missing. Then five layers run:
 
 ## Things worth knowing
 
+**Third-party installers are pinned and checksummed.** Homebrew's and
+oh-my-zsh's install scripts are downloaded from a fixed commit and checked
+against a SHA-256 before they run, not piped from a moving branch into a
+shell. A mismatch stops the install. To update, take a newer commit of the
+script, hash it with `shasum -a 256`, and change both values at the top of
+`install.sh`. Homebrew's installer stays interactive at a terminal, because it
+asks for the admin password. It only runs unattended without one, as in CI.
+
+**chsh needs a terminal.** Switching the login shell asks for your password.
+Without a terminal, such as in CI or with output piped, the zsh layer records
+it as a manual step instead of hanging.
+
 **bash 3.2.** The script targets the bash that macOS ships. That rules out
 `mapfile`, `${var,,}` and associative arrays. Sets of layers and profiles are
 space-padded strings, because bash 3.2 errors on `"${empty[@]}"` under
@@ -63,7 +75,8 @@ until it did. If you prefer ssh, put the rewrite in `~/.gitconfig-local`.
 into this repo. So `gh auth setup-git` and `git lfs install` add their
 sections **to the repo**. Move them into `~/.gitconfig-local`.
 
-**Not verified on a Mac.** The script was rewritten on Windows. It passes
+**Verified mostly off a Mac.** The CI workflow runs it on a clean macOS
+runner once pushed. Before that, the script was rewritten on Windows. It passes
 `bash -n`, and argument parsing and the dotfiles, tooling and extensions layers
 were exercised in dry-run mode under Git Bash against a scratch `$HOME`. Every
 Homebrew formula and cask name resolves on formulae.brew.sh. Run `--dry-run`
