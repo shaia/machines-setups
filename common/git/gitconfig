@@ -36,6 +36,11 @@
 	sort = version:refname
 [help]
 	autocorrect = prompt
+[core]
+	# Paths over 260 characters on Windows (deep node_modules, CMake and vcpkg
+	# build trees). Git for Windows needs this on top of the OS setting the
+	# install.ps1 system layer turns on; other platforms ignore the key.
+	longpaths = true
 [alias]
 	# Structural, syntax-aware diff (difftastic); delta stays the default pager.
 	dft = -c diff.external=difft diff

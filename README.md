@@ -34,7 +34,7 @@ Every machine gets **core**, which contains:
 - ripgrep, fd, bat, eza, jq, yq, fzf, zoxide, lazygit, sd, glow, tldr, btop, dust, duf, hyperfine, gping, doggo and fastfetch
 - uv, and pre-commit installed through it
 - VS Code with language-neutral extensions: GitLens, Error Lens, GitHub PRs, Copilot, Todo Tree, Mermaid and Draw.io among them
-- on Windows: gsudo, PowerToys, Everything, Sysinternals, and the Terminal-Icons, PSScriptAnalyzer and WinGet modules
+- on Windows: WSL 2 with Ubuntu, gsudo, PowerToys, Everything, Sysinternals, and the Terminal-Icons, PSScriptAnalyzer and WinGet modules; plus file extensions shown in Explorer and long path support
 
 Everything else is a **profile**, chosen at install time:
 
@@ -101,6 +101,9 @@ needs registering. To add a tool to an existing profile, add one line.
 - **Git that does not surprise you.** Pulls are fast-forward only, deleted
   remote branches are pruned, rerere and zdiff3 conflict markers are on, and
   `main` is the default branch.
+- **Windows settings a build depends on.** Explorer shows file extensions, and
+  long paths are on in both Windows and git, so deep build trees do not fail at
+  260 characters.
 - **Nothing elevates itself, and nothing is upgraded.** Package installs skip
   anything already present, and every layer is safe to re-run.
 

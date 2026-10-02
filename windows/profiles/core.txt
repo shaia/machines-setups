@@ -53,6 +53,9 @@ psmodule Terminal-Icons         # file icons in Get-ChildItem
 psmodule PSScriptAnalyzer       # PowerShell linter
 psmodule Microsoft.WinGet.Client  # winget cmdlets for scripting
 
+# Windows platform. The system layer installs a distro and checks the settings.
+Microsoft.WSL                   # WSL 2; Ubuntu is installed by the system layer
+
 # Editor and desktop
 Microsoft.VisualStudioCode
 Microsoft.PowerToys

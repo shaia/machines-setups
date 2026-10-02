@@ -60,7 +60,8 @@ $NerdFontFace = 'JetBrainsMono NF'
 $VsProductId = 'Microsoft.VisualStudio.Product.Community'
 $VsVersionRange = '[18.0,19.0)'
 
-$AllLayers = @('packages', 'vs', 'dotfiles', 'tooling', 'extensions')
+$AllLayers = @('packages', 'system', 'vs', 'dotfiles', 'tooling', 'extensions')
+$WslDistro = 'Ubuntu'
 $Layers = $AllLayers
 
 # --- Output helpers ----------------------------------------------------------
@@ -408,6 +409,73 @@ function Invoke-LayerPackages {
         Write-Warn "'winget search <name>' finds the current id."
     }
     if ($added -gt 0 -and -not $DryRun) { Update-SessionPath }
+}
+
+# --- Layer: system -----------------------------------------------------------
+#
+# Windows settings every developer machine wants. Per-user settings are applied
+# directly; machine-wide ones only from an elevated shell, otherwise the exact
+# command is printed (gsudo comes with core), because nothing here elevates
+# itself.
+
+function Invoke-LayerSystem {
+    Write-Step "Windows settings"
+
+    # File Explorer shows file extensions: "report.pdf.exe" stops looking like a PDF,
+    # and renaming .txt to .ps1 actually changes the type.
+    $adv = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'
+    $hide = (Get-ItemProperty -Path $adv -ErrorAction SilentlyContinue).PSObject.Properties['HideFileExt']
+    if ($null -ne $hide -and $hide.Value -eq 0) {
+        Write-Info "File Explorer already shows file extensions."
+    }
+    else {
+        RunBlock "Set HKCU\...\Explorer\Advanced HideFileExt = 0" {
+            Set-ItemProperty -Path $adv -Name HideFileExt -Value 0 -Type DWord
+        }
+        Write-Info "File Explorer now shows file extensions (open windows pick it up after an Explorer restart)."
+    }
+
+    # Paths longer than 260 characters. Deep node_modules, CMake build trees and
+    # vcpkg buildtrees exceed it and fail with "path not found". Machine-wide, so
+    # it needs elevation; core.longpaths in common/git/gitconfig covers git, which
+    # ignores this setting.
+    $fs = 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem'
+    $long = (Get-ItemProperty -Path $fs).PSObject.Properties['LongPathsEnabled']
+    if ($null -ne $long -and $long.Value -eq 1) {
+        Write-Info "Long path support is already on."
+    }
+    elseif ($script:Elevated) {
+        RunBlock "Set HKLM\...\FileSystem LongPathsEnabled = 1" {
+            Set-ItemProperty -Path $fs -Name LongPathsEnabled -Value 1 -Type DWord
+        }
+        Write-Info "Long path support is on (processes started from now on see it)."
+    }
+    else {
+        Write-Warn "Long path support is off, and turning it on needs elevation. Run once:"
+        Write-Host "    gsudo Set-ItemProperty -Path $fs -Name LongPathsEnabled -Value 1 -Type DWord"
+    }
+
+    # WSL 2 with a Linux distro. `wsl --status` fails until the platform (the
+    # Virtual Machine Platform feature) is enabled, which needs elevation and a
+    # reboot. Distros are read from the registry: `wsl -l` prints UTF-16.
+    $null = Invoke-Capture @('wsl.exe', '--status')
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "WSL is not enabled yet. Run once, elevated, then reboot and re-run -Only system:"
+        Write-Host "    gsudo wsl --install --no-distribution"
+        return
+    }
+    $distros = @(Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss' -ErrorAction SilentlyContinue |
+        ForEach-Object { (Get-ItemProperty $_.PSPath).DistributionName } |
+        Where-Object { $_ -and $_ -notlike 'docker-desktop*' })
+    if ($distros.Count -gt 0) {
+        Write-Info "WSL 2 is enabled with: $($distros -join ', ')."
+    }
+    else {
+        Write-Info "WSL 2 is enabled but has no distro; installing $WslDistro."
+        $code = Run @('wsl.exe', '--install', '-d', $WslDistro, '--no-launch')
+        if ($code -eq 0) { Write-Info "$WslDistro installed; launch it once from the Start menu to create your Linux user." }
+        else { Write-Warn "  wsl --install -d $WslDistro exited $code." }
+    }
 }
 
 # --- Layer: vs ---------------------------------------------------------------
@@ -793,6 +861,7 @@ function Invoke-Main {
     Invoke-Preflight
 
     if (Wants 'packages')   { Invoke-LayerPackages }
+    if (Wants 'system')     { Invoke-LayerSystem }
     if (Wants 'vs')         { Invoke-LayerVs }
     if (Wants 'dotfiles')   { Invoke-LayerDotfiles }
     if (Wants 'tooling')    { Invoke-LayerTooling }

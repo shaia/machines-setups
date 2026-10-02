@@ -4,7 +4,7 @@
 # unless already installed. The cross-platform half of this profile is
 # common/profiles/containers.txt.
 
-Microsoft.WSL                   # Docker Desktop's backend; first run may need a reboot
+Microsoft.WSL                   # Docker Desktop's backend (also in core; listed for clarity)
 Docker.DockerDesktop
 Kubernetes.kubectl
 Helm.Helm

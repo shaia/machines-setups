@@ -17,11 +17,12 @@ them. This file covers what is specific to Windows.
 ## Layers
 
 Preflight always runs. It checks that winget and git are present, whether the
-shell is elevated, and whether Developer Mode is on. Then five layers run:
+shell is elevated, and whether Developer Mode is on. Then six layers run:
 
 | Layer | Does |
 | --- | --- |
 | `packages` | `winget install --id --exact` for every id in `profiles\core.txt` and each selected profile that `winget export` does not already report, so nothing is upgraded |
+| `system` | Shows file extensions in Explorer. Turns on long path support when elevated, otherwise prints the `gsudo` command. Checks WSL 2 and installs Ubuntu when WSL has no distro |
 | `vs` | Applies `vsconfig\<profile>.vsconfig` for each selected profile that has one (`cpp`, `lowlevel`) to Visual Studio 2026 Community with `setup.exe modify`, when `vswhere -requires` says a component is missing |
 | `dotfiles` | Backs up, then symlinks, `.gitconfig`, `.config\git\ignore`, `.config\starship.toml` and the pwsh `profile.ps1` and `shell-ux.ps1`. Also `.config\git\delta.gitconfig` once delta is installed. Sets Windows Terminal's default profile and font |
 | `tooling` | PowerShell modules into pwsh 7, `go install` tools, npm globals, `uv python install`, `uv tool install` |
@@ -101,6 +102,19 @@ Terminal (an MSIX app) and VS Code (Chromium) do not see per-user fonts.
 `[Environment]::GetFolderPath('MyDocuments')` points, which is where PowerShell
 looks for them. OneDrive syncs a link's content as a plain file. On another
 machine, `install.ps1` backs that copy up and replaces it with a link.
+
+**Long paths need two switches.** Windows rejects paths over 260 characters
+unless `LongPathsEnabled` is set under
+`HKLM\SYSTEM\CurrentControlSet\Control\FileSystem`, and Git for Windows ignores
+that setting unless `core.longpaths` is true. The shared gitconfig sets the
+second. The first is machine-wide, so the system layer sets it only from an
+elevated shell and otherwise prints the `gsudo` command for it.
+
+**WSL 2 is in core.** The first `wsl --install` enables the Virtual Machine
+Platform feature, which needs elevation and a reboot. Until then the system
+layer prints `gsudo wsl --install --no-distribution`. After the reboot it
+installs Ubuntu without launching it. Launch Ubuntu once from the Start menu to
+create your Linux user.
 
 **Profiles can require profiles.** A `requires <profile>` line in a profile file
 pulls that profile in, so `-Profile lowlevel` alone also selects `cpp`. The WDK
