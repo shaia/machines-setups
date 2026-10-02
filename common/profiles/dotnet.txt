@@ -6,5 +6,6 @@
 #   go <module>@<version>     go install
 #   npm <package>             npm install -g
 #   uv-python <version>       uv python install
+#   uv-tool <name>            uv tool install
 
 vscode ms-dotnettools.csdevkit

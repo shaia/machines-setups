@@ -5,6 +5,7 @@
 # common/profiles/core.txt.
 
 # Shell and terminal
+Warp.Warp                       # the terminal; set its prompt to honour PS1 (see README)
 Microsoft.PowerShell            # pwsh 7 is the shell; dotfiles/powershell targets it
 Microsoft.WindowsTerminal       # install sets pwsh as its default profile
 Starship.Starship               # prompt; common/starship.toml
@@ -24,13 +25,36 @@ jqlang.jq
 junegunn.fzf                    # Ctrl+R / Ctrl+T through PSFzf
 ajeetdsouza.zoxide              # z <dir>
 7zip.7zip
+eza-community.eza               # ll
+aristocratos.btop4win           # btop
+tldr-pages.tlrc                 # tldr <command>
+MikeFarah.yq                    # jq for YAML
+sharkdp.hyperfine               # command benchmarks
+bootandy.dust                   # disk usage
+muesli.duf                      # df
+chmln.sd                        # find and replace
+charmbracelet.glow              # Markdown in the terminal
+Fastfetch-cli.Fastfetch
+orf.gping                       # ping graph
+MrKaran.Doggo                   # DNS lookups
+gerardog.gsudo                  # sudo for Windows: elevate one command
+
+# Developer workflow
+astral-sh.uv                    # Python tooling; pre-commit installs through it
+nektos.act                      # run GitHub Actions locally
+Wilfred.difftastic              # git dft
 
 # PowerShell modules shell-ux.ps1 loads, installed into pwsh 7's user scope.
 # 'psmodule <name>' lines are the one non-winget kind in these files.
 psmodule PSFzf                  # fzf key bindings
 psmodule posh-git               # git tab completion
 psmodule CompletionPredictor    # IntelliSense-driven inline predictions
+psmodule Terminal-Icons         # file icons in Get-ChildItem
+psmodule PSScriptAnalyzer       # PowerShell linter
+psmodule Microsoft.WinGet.Client  # winget cmdlets for scripting
 
 # Editor and desktop
 Microsoft.VisualStudioCode
 Microsoft.PowerToys
+voidtools.Everything            # instant filename search
+Microsoft.Sysinternals.Suite    # Process Explorer, Process Monitor, Autoruns

@@ -607,7 +607,7 @@ function Get-GoBinaryName {
 }
 
 function Invoke-LayerTooling {
-    Write-Step "PowerShell modules, Go tools, npm globals, uv Pythons"
+    Write-Step "PowerShell modules, Go tools, npm globals, uv Pythons and tools"
 
     # Installed from inside pwsh 7 so they land on its module path; the user
     # module path of Windows PowerShell is invisible to pwsh.
@@ -682,12 +682,32 @@ function Invoke-LayerTooling {
         else { Write-Warn "uv not on PATH; skipping Python. Run the packages layer first." }
     }
 
+    # Command-line tools uv installs into their own isolated environments.
+    $uvTools = @(Get-ProfileEntries 'uv-tool')
+    if ($uvTools.Count -gt 0) {
+        if (Test-Command uv) {
+            # `uv tool list` prints "<name> v<version>" for each tool, then its executables.
+            $installed = @((Invoke-Capture @('uv', 'tool', 'list')).Output |
+                Where-Object { $_ -match '^(\S+) v' } | ForEach-Object { $Matches[1].ToLowerInvariant() })
+            foreach ($tool in $uvTools) {
+                if ($installed -contains $tool.ToLowerInvariant()) { Write-Info "uv tool $tool already installed." }
+                else {
+                    Write-Info "uv tool install $tool"
+                    Run @('uv', 'tool', 'install', $tool) | Out-Null
+                }
+            }
+        }
+        else { Write-Warn "uv not on PATH; skipping uv tools. Run the packages layer first." }
+    }
+
     Write-Step "Manual steps this script deliberately leaves to you"
     Write-Host "  gh auth login          # then move what it writes into ~\.gitconfig (a link into"
     Write-Host "                         # this repo) over to ~\.gitconfig-local"
     Write-Host "  ~\.gitconfig-local     # your git identity; see the dotfiles layer's message"
     Write-Host "  ssh keys               # not in this repo; generate or restore your own"
     Write-Host "  Developer Mode         # Settings > System > For developers; symlinks without elevation"
+    Write-Host "  Warp settings          # Appearance > Prompt: honour the custom prompt (PS1), so starship shows;"
+    Write-Host "                         # Appearance > Text: font JetBrainsMono Nerd Font"
     Write-Host "  Docker Desktop         # containers profile: launch once; it provisions its WSL distro"
     Write-Host "  devshell               # cpp profile: run in pwsh to put MSVC on PATH for that session"
 }

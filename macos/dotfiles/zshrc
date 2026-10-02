@@ -3,6 +3,12 @@
 # oh-my-zsh for its plugins and completion setup, starship for the prompt.
 # Homebrew's environment comes from ~/.zprofile, so $HOMEBREW_PREFIX is set.
 
+# --- Warp -------------------------------------------------------------------------
+# Warp brings its own input editor, completions, Ctrl+R history search,
+# autosuggestions and syntax highlighting, so the fzf key bindings and the two zsh
+# plugins at the bottom are skipped inside it. They still load in iTerm2 and VS Code.
+[[ $TERM_PROGRAM == WarpTerminal ]] && __warp=1 || __warp=0
+
 # --- oh-my-zsh ------------------------------------------------------------------
 export ZSH="$HOME/.oh-my-zsh"
 ZSH_THEME=""                       # the prompt is starship, initialised below
@@ -29,15 +35,16 @@ command -v kubectl >/dev/null 2>&1 && alias k=kubectl
 
 # --- Tools ----------------------------------------------------------------------
 command -v zoxide >/dev/null 2>&1 && eval "$(zoxide init zsh)"     # z <dir>, zi
-command -v fzf >/dev/null 2>&1 && source <(fzf --zsh)              # Ctrl+R, Ctrl+T, Alt+C
+(( ! __warp )) && command -v fzf >/dev/null 2>&1 && source <(fzf --zsh)   # Ctrl+R, Ctrl+T, Alt+C
 
 # --- Prompt -----------------------------------------------------------------------
 command -v starship >/dev/null 2>&1 && eval "$(starship init zsh)"
 
 # --- zsh-autosuggestions (must come before syntax-highlighting) ------------------
-[[ -r $HOMEBREW_PREFIX/share/zsh-autosuggestions/zsh-autosuggestions.zsh ]] && \
+(( ! __warp )) && [[ -r $HOMEBREW_PREFIX/share/zsh-autosuggestions/zsh-autosuggestions.zsh ]] && \
   source $HOMEBREW_PREFIX/share/zsh-autosuggestions/zsh-autosuggestions.zsh
 
 # --- zsh-syntax-highlighting: MUST be sourced LAST ------------------------------
-[[ -r $HOMEBREW_PREFIX/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]] && \
+(( ! __warp )) && [[ -r $HOMEBREW_PREFIX/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]] && \
   source $HOMEBREW_PREFIX/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+unset __warp

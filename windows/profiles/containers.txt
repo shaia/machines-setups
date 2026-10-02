@@ -10,3 +10,8 @@ Kubernetes.kubectl
 Helm.Helm
 Derailed.k9s
 Kubernetes.kind
+JesseDuffield.Lazydocker
+wagoodman.dive                  # image layer inspector
+ahmetb.kubectx
+ahmetb.kubens
+stern.stern                     # multi-pod log tailing

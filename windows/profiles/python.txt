@@ -4,4 +4,5 @@
 # unless already installed. The cross-platform half of this profile is
 # common/profiles/python.txt.
 
-astral-sh.uv
+# uv itself is in core. Nothing Windows-specific is needed here; the profile is
+# common/profiles/python.txt.

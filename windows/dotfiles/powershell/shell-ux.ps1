@@ -6,8 +6,8 @@
 # ORDER IS LOAD-BEARING. Starship must be initialised LAST: it defines the `prompt`
 # function, and posh-git also defines one on import. Last writer wins.
 #
-# Requires (all from the core profile): starship, zoxide, fzf, and the PSReadLine,
-# posh-git, PSFzf and CompletionPredictor modules. Each piece degrades to nothing
+# Requires (all from the core profile): starship, zoxide, fzf, eza, and the PSReadLine,
+# posh-git, PSFzf, CompletionPredictor and Terminal-Icons modules. Each piece degrades to nothing
 # when its tool is missing.
 
 # --- bail out for non-interactive sessions -----------------------------------
@@ -16,11 +16,17 @@ $__cmdline = [Environment]::GetCommandLineArgs()
 if ($__cmdline -contains '-NonInteractive' -or $__cmdline -contains '-noni') { return }
 if ($Host.Name -notin 'ConsoleHost', 'Visual Studio Code Host') { return }
 
+# --- Warp ---------------------------------------------------------------------
+# Warp brings its own input editor, completions, Ctrl+R history search,
+# autosuggestions and syntax highlighting, so the PSReadLine tuning, the lazy
+# posh-git completer and the fzf key bindings below are skipped inside it. They
+# still load in the VS Code terminal and in Windows Terminal.
+$__warp = $env:TERM_PROGRAM -eq 'WarpTerminal'
 
 # --- PSReadLine: fish-style suggestions, history search, syntax colours ------
 # Interactive hosts have already loaded it; importing again costs ~145 ms for nothing.
-if (-not (Get-Module PSReadLine)) { Import-Module PSReadLine -ErrorAction SilentlyContinue }
-if (Get-Module PSReadLine) {
+if (-not $__warp -and -not (Get-Module PSReadLine)) { Import-Module PSReadLine -ErrorAction SilentlyContinue }
+if (-not $__warp -and (Get-Module PSReadLine)) {
 
     Set-PSReadLineOption -HistoryNoDuplicates `
         -HistorySearchCursorMovesToEnd `
@@ -75,6 +81,7 @@ if (Get-Module PSReadLine) {
 # So register a stub completer that imports posh-git on the FIRST git completion;
 # posh-git then replaces this registration with its own for the rest of the session.
 # Verified: importing posh-git *after* starship does not clobber starship's prompt.
+if (-not $__warp) {
 Register-ArgumentCompleter -Native -CommandName git, git.exe, g -ScriptBlock {
     param($wordToComplete, $commandAst, $cursorPosition)
     if (-not (Get-Module posh-git)) { Import-Module posh-git -ErrorAction SilentlyContinue }
@@ -85,13 +92,14 @@ Register-ArgumentCompleter -Native -CommandName git, git.exe, g -ScriptBlock {
         Expand-GitCommand $textToComplete
     }
 }
+}
 
 
 # --- PSFzf: LAZY Ctrl+R fuzzy history, Ctrl+T file picker --------------------
 # Same trick as posh-git: importing PSFzf costs 200-500 ms at startup for two key
 # bindings. Bind cheap stubs instead; the first press imports PSFzf, hands the chords
 # over to PSFzf's own handlers via Set-PsFzfOption, and runs the real handler.
-if (Get-Command fzf -ErrorAction SilentlyContinue) {
+if (-not $__warp -and (Get-Command fzf -ErrorAction SilentlyContinue)) {
 
     $env:FZF_DEFAULT_OPTS = '--height 45% --layout=reverse --border=rounded --info=inline ' +
     '--color=bg+:#313244,bg:#1e1e2e,spinner:#f5e0dc,hl:#f38ba8,fg:#cdd6f4,' +
@@ -124,6 +132,11 @@ if (Get-Command zoxide -ErrorAction SilentlyContinue) {
 }
 
 
+# --- Terminal-Icons: file and folder icons in Get-ChildItem output ------------
+# Needs the Nerd Font core installs. Skipped silently when the module is absent.
+Import-Module Terminal-Icons -ErrorAction SilentlyContinue
+
+
 # --- aliases ------------------------------------------------------------------
 # `gp` is the one intentional override of a built-in alias (was Get-ItemProperty).
 
@@ -153,7 +166,13 @@ function Invoke-GitLogGraph { git log --oneline --graph --decorate --all @args }
 Set-Alias -Name gp  -Value Invoke-GitPush     -Force
 Set-Alias -Name glg -Value Invoke-GitLogGraph -Force
 
-function ll { Get-ChildItem -Force @args }
+# ll: eza with icons and git status when it is installed, Get-ChildItem otherwise.
+if (Get-Command eza -ErrorAction SilentlyContinue) {
+    function ll { eza -al --icons --git --group-directories-first @args }
+}
+else {
+    function ll { Get-ChildItem -Force @args }
+}
 function .. { Set-Location .. }
 function ... { Set-Location ..\.. }
 function .... { Set-Location ..\..\.. }

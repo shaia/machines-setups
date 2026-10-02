@@ -8,3 +8,7 @@ brew "kubernetes-cli"
 brew "helm"
 brew "k9s"
 brew "kind"
+brew "lazydocker"
+brew "dive"                     # image layer inspector
+brew "kubectx"                  # kubectx and kubens
+brew "stern"                    # multi-pod log tailing

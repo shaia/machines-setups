@@ -36,6 +36,9 @@
 	sort = version:refname
 [help]
 	autocorrect = prompt
+[alias]
+	# Structural, syntax-aware diff (difftastic); delta stays the default pager.
+	dft = -c diff.external=difft diff
 
 # delta as the pager. install links this file only when delta is on PATH,
 # so a machine without it keeps git's default pager instead of erroring.

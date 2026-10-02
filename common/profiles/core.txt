@@ -6,6 +6,7 @@
 #   go <module>@<version>     go install
 #   npm <package>             npm install -g
 #   uv-python <version>       uv python install
+#   uv-tool <name>            uv tool install
 
 vscode eamodio.gitlens
 vscode editorconfig.editorconfig
@@ -16,3 +17,14 @@ vscode tamasfe.even-better-toml
 vscode github.vscode-github-actions
 vscode ms-vscode-remote.remote-ssh
 vscode pkief.material-icon-theme
+vscode usernamehw.errorlens
+vscode github.vscode-pull-request-github
+vscode github.copilot
+vscode github.copilot-chat
+vscode ms-vscode.powershell
+vscode gruntfuggly.todo-tree
+vscode bierner.markdown-mermaid
+vscode hediet.vscode-drawio
+
+# Git hooks framework; uv is in every platform's core so this always installs.
+uv-tool pre-commit

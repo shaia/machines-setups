@@ -315,7 +315,7 @@ go_binary_name() {
 }
 
 layer_tooling() {
-  step "Go tools, npm globals, uv Pythons, Rust toolchain"
+  step "Go tools, npm globals, uv Pythons and tools, Rust toolchain"
 
   go_modules="$(common_entries go)"
   if [[ -n "$go_modules" ]]; then
@@ -369,6 +369,26 @@ layer_tooling() {
     fi
   fi
 
+  # Command-line tools uv installs into their own isolated environments.
+  uv_tools="$(common_entries uv-tool)"
+  if [[ -n "$uv_tools" ]]; then
+    if command -v uv >/dev/null 2>&1; then
+      # `uv tool list` prints "<name> v<version>" for each tool, then its executables.
+      present=" $(uv tool list 2>/dev/null | awk '$2 ~ /^v/ { print tolower($1) }' | tr '\n' ' ') "
+      for tool in $uv_tools; do
+        lower=$(printf '%s' "$tool" | tr '[:upper:]' '[:lower:]')
+        if in_set "$lower" "$present"; then
+          info "uv tool $tool already installed."
+        else
+          info "uv tool install $tool"
+          run uv tool install "$tool"
+        fi
+      done
+    else
+      warn "uv not on PATH; skipping uv tools. Run the packages layer first."
+    fi
+  fi
+
   # Homebrew's rustup installs the manager only; it has no toolchain until
   # one is chosen.
   if in_set rust "$PROFILES"; then
@@ -390,6 +410,8 @@ layer_tooling() {
   printf '  ~/.gitconfig-local  # your git identity; see the dotfiles layer message\n'
   printf '  ssh keys            # not in this repo; generate or restore your own\n'
   printf '  Docker Desktop      # containers profile: launch once to finish setup\n'
+  printf '  Warp settings       # Appearance > Prompt: honour the custom prompt (PS1), so starship\n'
+  printf '                      # shows; Appearance > Text: font JetBrainsMono Nerd Font\n'
   printf '  iTerm2 font         # Settings > Profiles > Text: JetBrainsMono Nerd Font\n'
 }
 

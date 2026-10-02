@@ -6,6 +6,9 @@
 #   go <module>@<version>     go install
 #   npm <package>             npm install -g
 #   uv-python <version>       uv python install
+#   uv-tool <name>            uv tool install
 
 npm @anthropic-ai/claude-code
 vscode anthropic.claude-code
+npm @google/gemini-cli
+npm @openai/codex

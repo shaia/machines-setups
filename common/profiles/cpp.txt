@@ -6,6 +6,7 @@
 #   go <module>@<version>     go install
 #   npm <package>             npm install -g
 #   uv-python <version>       uv python install
+#   uv-tool <name>            uv tool install
 
 # clangd rather than Microsoft's cpptools IntelliSense: faster, and the same
 # engine on every platform. It needs compile_commands.json from the build.

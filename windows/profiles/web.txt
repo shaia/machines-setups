@@ -5,3 +5,5 @@
 # common/profiles/web.txt.
 
 OpenJS.NodeJS.LTS
+ducaale.xh                      # HTTP client
+FiloSottile.mkcert              # locally trusted dev certificates
