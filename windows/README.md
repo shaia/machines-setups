@@ -22,7 +22,7 @@ shell is elevated, and whether Developer Mode is on. Then five layers run:
 | Layer | Does |
 | --- | --- |
 | `packages` | `winget install --id --exact` for every id in `profiles\core.txt` and each selected profile that `winget export` does not already report, so nothing is upgraded |
-| `vs` | cpp profile only: applies `vsconfig\cpp.vsconfig` to Visual Studio 2026 Community with `setup.exe modify`, when `vswhere -requires` says a component is missing |
+| `vs` | Applies `vsconfig\<profile>.vsconfig` for each selected profile that has one (`cpp`, `lowlevel`) to Visual Studio 2026 Community with `setup.exe modify`, when `vswhere -requires` says a component is missing |
 | `dotfiles` | Backs up, then symlinks, `.gitconfig`, `.config\git\ignore`, `.config\starship.toml` and the pwsh `profile.ps1` and `shell-ux.ps1`. Also `.config\git\delta.gitconfig` once delta is installed. Sets Windows Terminal's default profile and font |
 | `tooling` | PowerShell modules into pwsh 7, `go install` tools, npm globals, `uv python install`, `uv tool install` |
 | `extensions` | VS Code extensions from `common\profiles\` |
@@ -101,6 +101,12 @@ Terminal (an MSIX app) and VS Code (Chromium) do not see per-user fonts.
 `[Environment]::GetFolderPath('MyDocuments')` points, which is where PowerShell
 looks for them. OneDrive syncs a link's content as a plain file. On another
 machine, `install.ps1` backs that copy up and replaces it with a link.
+
+**Profiles can require profiles.** A `requires <profile>` line in a profile file
+pulls that profile in, so `-Profile lowlevel` alone also selects `cpp`. The WDK
+package in `lowlevel` is pinned to the same Windows SDK version (26100) as
+`cpp.vsconfig`, because a WDK only builds against its matching SDK. Raise both
+together.
 
 **Rust needs the C++ tools.** rustup's MSVC toolchain links with Visual
 Studio's linker. Select `cpp` together with `rust`, or rustup-init will offer to

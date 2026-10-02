@@ -51,6 +51,7 @@ Everything else is a **profile**, chosen at install time:
 | `cloud` | AWS CLI, OpenTofu, Terragrunt |
 | `ai` | Ollama, the Claude desktop app, Claude Code, Gemini CLI and Codex CLI, plus the Claude Code extension |
 | `gpu` | Windows only: CUDA Toolkit and Nsight Compute |
+| `lowlevel` | Windows only, pulls in `cpp`: WinDbg, x64dbg, the WDK with its Visual Studio extension and Spectre libraries, PE-bear, Dependencies, ImHex, HxD, Cutter, Binary Ninja Free, PerfView, Tracy, the Windows Performance Toolkit, System Informer, Cppcheck, sccache, NASM. Ghidra, VTune, uProf, OSR Driver Loader and Hyper-V are listed as manual steps |
 | `apps` | Chrome, Arc, Obsidian, Slack, Zoom, Postman. On Windows also ShareX and WizTree |
 
 `all` selects every profile. A run with no profile installs core and lists
@@ -69,8 +70,8 @@ macos/
   dotfiles/             zshrc, zprofile
 windows/
   install.ps1
-  profiles/<name>.txt   winget ids, plus PowerShell modules in core
-  vsconfig/cpp.vsconfig the Visual Studio workload for the cpp profile
+  profiles/<name>.txt   winget ids, `psmodule` lines, and `requires <profile>`
+  vsconfig/<name>.vsconfig  Visual Studio components a profile adds (cpp, lowlevel)
   dotfiles/powershell/  profile.ps1, shell-ux.ps1
 ```
 

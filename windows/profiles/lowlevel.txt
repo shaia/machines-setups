@@ -1,0 +1,44 @@
+# Low-level Windows: debuggers, driver development, binary inspection, reverse
+# engineering, tracing and profiling. Windows only.
+#
+# winget package ids, one per line, installed with `winget install --id <id> --exact`
+# unless already installed. `requires <profile>` pulls another profile in.
+#
+# Not on winget, so install.ps1 lists them as manual steps instead:
+#   Ghidra (NSA GitHub releases; runs on the java profile's JDK), Intel VTune,
+#   AMD uProf, OSR Driver Loader, and Hyper-V as a kernel-debugging target.
+
+requires cpp                    # MSVC and the Windows SDK; the WDK builds on them
+
+# Debugging
+Microsoft.WinDbg                # user-mode, crash-dump and kernel debugging
+x64dbg.x64dbg                   # lighter user-mode debugger
+
+# Drivers. The WDK must match the SDK version in vsconfig/cpp.vsconfig (26100);
+# vsconfig/lowlevel.vsconfig adds its Visual Studio extension.
+Microsoft.WindowsWDK.10.0.26100
+
+# Binary inspection
+hasherezade.PE-bear             # PE headers, sections, imports
+lucasg.Dependencies             # DLL dependency tree; replaces Dependency Walker
+WerWolv.ImHex                   # hex editor with pattern language
+MHNexus.HxD                     # fast plain hex editor
+
+# Reverse engineering
+Rizin.Cutter                    # Rizin GUI with Ghidra decompiler plugin
+Vector35.BinaryNinja            # the free edition installs from this id
+
+# Tracing and profiling. WPR/WPA come from the Windows Performance Toolkit,
+# which vsconfig/lowlevel.vsconfig adds.
+Microsoft.PerfView              # .NET and ETW CPU/memory analysis
+wolfpld.tracy                   # instrumented frame profiler
+
+# System inspection
+WinsiderSS.SystemInformer       # successor to Process Hacker
+
+# Code quality and build
+Cppcheck.Cppcheck               # static analysis; clang-tidy comes with LLVM in cpp
+Mozilla.sccache                 # compiler cache for C, C++ and Rust
+
+# Assembly. MASM (ml64) ships with MSVC.
+NASM.NASM

@@ -297,7 +297,21 @@ $Layers = @($AllLayers | Where-Object { $Layers -contains $_ })
 $requested = @()
 if ($Profiles) { $requested = @(ConvertTo-NameList $Profiles ($AvailableProfiles + @('all')) 'profile') }
 if ($requested -contains 'all') { $requested = $AvailableProfiles }
-$SelectedProfiles = @('core') + @($AvailableProfiles | Where-Object { $requested -contains $_ })
+# `requires <profile>` lines pull other profiles in (lowlevel needs cpp's
+# compilers); expand until nothing new appears.
+$wanted = @($requested)
+do {
+    $added = $false
+    foreach ($p in @($wanted)) {
+        foreach ($e in @(Get-Entries (Join-Path $ScriptDir "profiles\$p.txt"))) {
+            $parts = $e -split ' ', 2
+            if ($parts[0] -eq 'requires' -and $parts.Count -eq 2 -and $wanted -notcontains $parts[1]) {
+                $wanted += $parts[1]; $added = $true
+            }
+        }
+    }
+} while ($added)
+$SelectedProfiles = @('core') + @($AvailableProfiles | Where-Object { $wanted -contains $_ })
 
 function Wants { param([string]$Layer) return ($Layers -contains $Layer) }
 
@@ -398,16 +412,19 @@ function Invoke-LayerPackages {
 
 # --- Layer: vs ---------------------------------------------------------------
 #
-# winget installs Visual Studio with its default workloads. vsconfig\cpp.vsconfig
-# holds the curated C++ selection; the installer's `modify --config` adds
-# whatever is missing. vswhere -requires answers "is every listed component
-# present" without launching the installer.
+# winget installs Visual Studio with its default workloads. Each profile that
+# needs more ships vsconfig\<profile>.vsconfig (cpp: the C++ toolset; lowlevel:
+# the WDK, Spectre-mitigated libraries and the Performance Toolkit); the
+# installer's `modify --config` adds whatever is missing. vswhere -requires
+# answers "is every listed component present" without launching the installer.
 
 function Invoke-LayerVs {
     Write-Step "Visual Studio workloads"
 
-    if ($SelectedProfiles -notcontains 'cpp') {
-        Write-Info "The cpp profile is not selected; nothing to do."
+    $configs = @($SelectedProfiles | ForEach-Object { Join-Path $ScriptDir "vsconfig\$_.vsconfig" } |
+        Where-Object { Test-Path -LiteralPath $_ })
+    if ($configs.Count -eq 0) {
+        Write-Info "No selected profile needs Visual Studio workloads; nothing to do."
         return
     }
     $installer = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer'
@@ -415,7 +432,7 @@ function Invoke-LayerVs {
     $setup = Join-Path $installer 'setup.exe'
     if (-not ((Test-Path -LiteralPath $vswhere) -and (Test-Path -LiteralPath $setup))) {
         Write-Warn "Visual Studio Installer not found; the packages layer installs Visual Studio."
-        Write-Warn "Re-run with -Profile cpp -Only vs afterwards."
+        Write-Warn "Re-run with the same -Profile and -Only vs afterwards."
         return
     }
 
@@ -425,18 +442,19 @@ function Invoke-LayerVs {
         return
     }
 
-    $cfg = Join-Path $ScriptDir 'vsconfig\cpp.vsconfig'
-    $components = @((Get-Content -LiteralPath $cfg -Raw | ConvertFrom-Json).components)
-    $query = @($vswhere, '-products', $VsProductId, '-version', $VsVersionRange, '-requires') + $components + @('-property', 'installationPath')
-    $satisfied = (Invoke-Capture $query).Output | Select-Object -First 1
-    if ($satisfied) {
-        Write-Info "cpp.vsconfig: all $($components.Count) components present."
-        return
+    foreach ($cfg in $configs) {
+        $name = Split-Path -Leaf $cfg
+        $components = @((Get-Content -LiteralPath $cfg -Raw | ConvertFrom-Json).components)
+        $query = @($vswhere, '-products', $VsProductId, '-version', $VsVersionRange, '-requires') + $components + @('-property', 'installationPath')
+        $satisfied = (Invoke-Capture $query).Output | Select-Object -First 1
+        if ($satisfied) {
+            Write-Info "${name}: all $($components.Count) components present."
+            continue
+        }
+        Write-Info "${name}: adding missing components (the installer elevates itself and may prompt)."
+        $code = Run @($setup, 'modify', '--installPath', $installPath, '--config', $cfg, '--passive', '--norestart')
+        if ($code -ne 0) { Write-Warn "  setup.exe modify exited $code for $name." }
     }
-
-    Write-Info "cpp.vsconfig: adding missing components (the installer elevates itself and may prompt)."
-    $code = Run @($setup, 'modify', '--installPath', $installPath, '--config', $cfg, '--passive', '--norestart')
-    if ($code -ne 0) { Write-Warn "  setup.exe modify exited $code." }
 }
 
 # --- Layer: dotfiles ---------------------------------------------------------
@@ -710,6 +728,18 @@ function Invoke-LayerTooling {
     Write-Host "                         # Appearance > Text: font JetBrainsMono Nerd Font"
     Write-Host "  Docker Desktop         # containers profile: launch once; it provisions its WSL distro"
     Write-Host "  devshell               # cpp profile: run in pwsh to put MSVC on PATH for that session"
+    if ($SelectedProfiles -contains 'lowlevel') {
+        Write-Host ""
+        Write-Host "  lowlevel tools that are not on winget:"
+        Write-Host "  Ghidra                 # github.com/NationalSecurityAgency/ghidra/releases; unzip, needs a"
+        Write-Host "                         # JDK 21 (the java profile installs Corretto 21)"
+        Write-Host "  Intel VTune            # Intel oneAPI site; CPU profiling on Intel hardware"
+        Write-Host "  AMD uProf              # AMD developer site; CPU profiling on AMD hardware"
+        Write-Host "  OSR Driver Loader      # osronline.com; test-load unsigned drivers in a VM"
+        Write-Host "  Hyper-V                # elevated, Pro/Enterprise only, then reboot:"
+        Write-Host "                         #   Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V-All"
+        Write-Host "                         # a VM is the safe target for kernel debugging with WinDbg"
+    }
 }
 
 # --- Layer: extensions -------------------------------------------------------
