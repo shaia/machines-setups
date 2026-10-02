@@ -24,7 +24,18 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 COMMON_DIR="$REPO_ROOT/common"
-BACKUP_DIR="$HOME/.dotfiles-backup-$(date +%Y%m%d-%H%M%S)"
+RUN_STAMP="$(date +%Y%m%d-%H%M%S)"
+BACKUP_DIR="$HOME/.dotfiles-backup-$RUN_STAMP"
+LOG_DIR="$HOME/.machines-setups/logs"
+LOCK_DIR="${TMPDIR:-/tmp}/machines-setups-install.lock"
+
+# Third-party installers are fetched at a pinned commit and checked against a
+# SHA-256 before they run, rather than piped from a moving branch into a shell.
+# To update: take a newer commit of the file, hash it, and change both values.
+HOMEBREW_INSTALL_URL="https://raw.githubusercontent.com/Homebrew/install/09c62fc577ec170172b0a184060f141a2c622dc1/install.sh"
+HOMEBREW_INSTALL_SHA256="5f333bbe53bc490e51e7ccb1df8779b3dd6ee73a1a7379efda216edb08ccb148"
+OHMYZSH_INSTALL_URL="https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/76ac9fcddc4e93c15dc778b4c6234755ad714e5a/tools/install.sh"
+OHMYZSH_INSTALL_SHA256="5574b96e94dbcb769f0d1592fa83aeb6ca2caf41c6ae5d76fcc7f04c524b4f55"
 
 case "$(uname -m)" in
   arm64) BREW_PREFIX="/opt/homebrew" ;;
@@ -51,6 +62,81 @@ run() {
     return 0
   fi
   "$@"
+}
+
+# run() with retries for network-bound commands: three attempts, 5 then 15
+# seconds apart. A dry run never retries, because run() returns 0 there.
+run_retry() {
+  if run "$@"; then return 0; fi
+  for delay in 5 15; do
+    warn "  '$1 ${2:-}' failed; retrying in ${delay}s."
+    sleep "$delay"
+    if run "$@"; then return 0; fi
+  done
+  return 1
+}
+
+# --- Results -----------------------------------------------------------------
+#
+# Every step records one outcome, printed as a summary at the end:
+#   ok       already in the desired state; nothing ran
+#   changed  applied, and the re-check after applying confirmed it
+#   failed   applied, but the re-check still fails (or the command failed)
+#   flagged  best-effort work that could not be done here; the run continues
+#   manual   needs something this script deliberately does not do
+# Only failed makes the script exit non-zero. Counters and a newline-separated
+# string rather than arrays, for bash 3.2 under set -u.
+
+N_OK=0; N_CHANGED=0; N_FAILED=0; N_FLAGGED=0; N_MANUAL=0
+NOTES=""
+
+result() {
+  status="$1"; name="$2"; detail="${3:-}"
+  case "$status" in
+    ok)      N_OK=$((N_OK + 1)) ;;
+    changed) N_CHANGED=$((N_CHANGED + 1)) ;;
+    failed)  N_FAILED=$((N_FAILED + 1)) ;;
+    flagged) N_FLAGGED=$((N_FLAGGED + 1)) ;;
+    manual)  N_MANUAL=$((N_MANUAL + 1)) ;;
+  esac
+  case "$status" in
+    failed|flagged|manual)
+      line="  [$(printf '%s' "$status" | tr '[:lower:]' '[:upper:]')] $name"
+      if [[ -n "$detail" ]]; then line="$line - $detail"; fi
+      NOTES="$NOTES$line
+"
+      ;;
+  esac
+  return 0
+}
+
+summary() {
+  step "Summary"
+  printf '  %s already fine, %s changed, %s failed, %s flagged, %s manual\n' \
+    "$N_OK" "$N_CHANGED" "$N_FAILED" "$N_FLAGGED" "$N_MANUAL"
+  if [[ -n "$NOTES" ]]; then printf '%s' "$NOTES"; fi
+  return 0
+}
+
+# Download a pinned installer, verify its SHA-256, and run it with bash.
+# Extra arguments are VAR=value pairs for its environment.
+run_pinned_installer() {
+  url="$1"; sha="$2"; shift 2
+  if [[ "$DRY_RUN" == true ]]; then
+    printf "  + curl -fsSL %s  (verify sha256 %s, then run)\n" "$url" "$sha"
+    return 0
+  fi
+  tmp="$(mktemp)"
+  if ! curl -fsSL "$url" -o "$tmp"; then
+    rm -f "$tmp"; error "Download failed: $url"; return 1
+  fi
+  actual="$(shasum -a 256 "$tmp" | cut -d' ' -f1)"
+  if [[ "$actual" != "$sha" ]]; then
+    rm -f "$tmp"; error "Checksum mismatch for $url (expected $sha, got $actual)."; return 1
+  fi
+  if env "$@" /bin/bash "$tmp"; then status=0; else status=$?; fi
+  rm -f "$tmp"
+  return $status
 }
 
 # For pipelines and redirections, which run() cannot take as argv.
@@ -184,8 +270,13 @@ preflight() {
   elif [[ -x "$BREW_PREFIX/bin/brew" ]]; then
     info "Homebrew found at $BREW_PREFIX/bin/brew but not on PATH."
   else
-    warn "Homebrew missing; installing."
-    run_sh '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+    warn "Homebrew missing; installing (pinned installer, checksum verified)."
+    # Interactive at a terminal (it asks for the admin password); unattended
+    # only without one, as in CI, where sudo needs no password.
+    brew_env="NONINTERACTIVE="
+    [[ -t 0 ]] || brew_env="NONINTERACTIVE=1"
+    run_pinned_installer "$HOMEBREW_INSTALL_URL" "$HOMEBREW_INSTALL_SHA256" "$brew_env" \
+      || { error "Homebrew installation failed."; exit 1; }
   fi
 
   # Put brew on PATH for the rest of this process, before .zprofile exists.
@@ -205,16 +296,21 @@ layer_packages() {
   for p in $PROFILES; do
     brewfile="$SCRIPT_DIR/profiles/$p.Brewfile"
     [[ -f "$brewfile" ]] || continue
-    info "Profile $p: $(grep -cE '^(brew|cask) "' "$brewfile" || true) entries."
-    # --no-upgrade: install what is missing, leave existing versions alone.
-    if run brew bundle install --file="$brewfile" --no-upgrade; then
-      :
-    else
-      warn "brew bundle reported failures for $p; the check below lists what is missing."
+    label="brew profile $p ($(grep -cE '^(brew|cask) "' "$brewfile" || true) entries)"
+    # --no-upgrade on check too, or merely outdated packages count as missing.
+    if [[ "$DRY_RUN" == false ]] && brew bundle check --file="$brewfile" --no-upgrade >/dev/null 2>&1; then
+      result ok "$label"
+      continue
     fi
-    if [[ "$DRY_RUN" == false ]] && ! brew bundle check --file="$brewfile" --no-upgrade >/dev/null 2>&1; then
-      warn "Profile $p: some entries are still missing:"
-      brew bundle check --file="$brewfile" --verbose --no-upgrade || true
+    # --no-upgrade: install what is missing, leave existing versions alone.
+    run_retry brew bundle install --file="$brewfile" --no-upgrade || true
+    if [[ "$DRY_RUN" == true ]]; then
+      result changed "$label" "dry run"
+    elif brew bundle check --file="$brewfile" --no-upgrade >/dev/null 2>&1; then
+      result changed "$label"
+    else
+      missing="$(brew bundle check --file="$brewfile" --verbose --no-upgrade 2>&1 | grep -i 'needs to be installed' | tr '\n' ' ' || true)"
+      result failed "$label" "still missing: $missing"
     fi
   done
 }
@@ -226,19 +322,26 @@ layer_zsh() {
 
   omz="$HOME/.oh-my-zsh"
   if [[ -d "$omz" ]]; then
-    info "oh-my-zsh already installed at $omz."
+    result ok "oh-my-zsh"
   else
     # KEEP_ZSHRC stops the installer replacing the .zshrc this repo owns;
     # RUNZSH and CHSH stop it taking over the terminal mid-script.
-    info "Installing oh-my-zsh (keeping any existing .zshrc)."
-    run_sh 'KEEP_ZSHRC=yes RUNZSH=no CHSH=no sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"'
+    info "Installing oh-my-zsh (pinned installer, checksum verified; keeping any existing .zshrc)."
+    run_pinned_installer "$OHMYZSH_INSTALL_URL" "$OHMYZSH_INSTALL_SHA256" KEEP_ZSHRC=yes RUNZSH=no CHSH=no || true
+    if [[ "$DRY_RUN" == true ]]; then result changed "oh-my-zsh" "dry run"
+    elif [[ -d "$omz" ]]; then result changed "oh-my-zsh"
+    else result failed "oh-my-zsh" "installer did not create $omz"; fi
   fi
 
   if [[ "${SHELL:-}" == */zsh ]]; then
-    info "Login shell is already zsh."
+    result ok "login shell zsh"
+  elif [[ -t 0 ]]; then
+    warn "Login shell is ${SHELL:-unknown}; switching to /bin/zsh (asks for your password)."
+    if run chsh -s /bin/zsh; then result changed "login shell zsh"
+    else result failed "login shell zsh" "chsh -s /bin/zsh failed"; fi
   else
-    warn "Login shell is ${SHELL:-unknown}; switching to /bin/zsh (may prompt for your password)."
-    run chsh -s /bin/zsh
+    # chsh asks for a password; without a terminal it would hang.
+    result manual "login shell zsh" "no terminal to ask for the password; run: chsh -s /bin/zsh"
   fi
 }
 
@@ -249,7 +352,7 @@ backup_then_link() {
   dst="$2"
 
   if [[ -L "$dst" && "$(readlink "$dst")" == "$src" ]]; then
-    info "$(basename "$dst") already linked."
+    result ok "link $dst"
     return 0
   fi
 
@@ -261,8 +364,10 @@ backup_then_link() {
 
   parent="$(dirname "$dst")"
   [[ -d "$parent" ]] || run mkdir -p "$parent"
-  run ln -s "$src" "$dst"
-  info "Linked $dst -> $src"
+  run ln -s "$src" "$dst" || true
+  if [[ "$DRY_RUN" == true ]]; then result changed "link $dst" "dry run"
+  elif [[ -L "$dst" && "$(readlink "$dst")" == "$src" ]]; then result changed "link $dst"
+  else result failed "link $dst" "ln -s failed; the original is in $BACKUP_DIR"; fi
 }
 
 layer_dotfiles() {
@@ -314,6 +419,14 @@ go_binary_name() {
   printf '%s' "$last"
 }
 
+# Installed npm globals and uv tools, space-padded for in_set.
+npm_globals() {
+  printf ' %s ' "$(npm ls -g --depth=0 --parseable 2>/dev/null | tr '\\' '/' | sed -n 's|.*/node_modules/||p' | tr '\n' ' ')"
+}
+uv_tools_installed() {
+  printf ' %s ' "$(uv tool list 2>/dev/null | awk '$2 ~ /^v/ { print tolower($1) }' | tr '\n' ' ')"
+}
+
 layer_tooling() {
   step "Go tools, npm globals, uv Pythons and tools, Rust toolchain"
 
@@ -324,48 +437,55 @@ layer_tooling() {
       for module in $go_modules; do
         name="$(go_binary_name "$module")"
         if [[ -x "$gobin/$name" ]]; then
-          info "$name already installed."
+          result ok "go install $name"
         else
           info "go install $module"
-          run go install "$module"
+          run_retry go install "$module" || true
+          if [[ "$DRY_RUN" == true ]]; then result changed "go install $name" "dry run"
+          elif [[ -x "$gobin/$name" ]]; then result changed "go install $name"
+          else result failed "go install $name" "$gobin/$name was not created"; fi
         fi
       done
     else
-      warn "go not on PATH; skipping Go tools. Run the packages layer first."
+      result flagged "go tools" "go not on PATH; open a new shell after the packages layer and re-run --only tooling"
     fi
   fi
 
   npm_packages="$(common_entries npm)"
   if [[ -n "$npm_packages" ]]; then
     if command -v npm >/dev/null 2>&1; then
-      present=" $(npm ls -g --depth=0 --parseable 2>/dev/null | tr '\\' '/' | sed -n 's|.*/node_modules/||p' | tr '\n' ' ') "
       for pkg in $npm_packages; do
-        if in_set "$pkg" "$present"; then
-          info "npm: $pkg already installed."
+        if in_set "$pkg" "$(npm_globals)"; then
+          result ok "npm global $pkg"
         else
           info "npm install -g $pkg"
-          run npm install -g "$pkg"
+          run_retry npm install -g "$pkg" || true
+          if [[ "$DRY_RUN" == true ]]; then result changed "npm global $pkg" "dry run"
+          elif in_set "$pkg" "$(npm_globals)"; then result changed "npm global $pkg"
+          else result failed "npm global $pkg" "npm install -g did not install it"; fi
         fi
       done
     else
-      warn "npm not on PATH; skipping npm globals. Run the packages layer first."
+      result flagged "npm globals" "npm not on PATH; open a new shell after the packages layer and re-run --only tooling"
     fi
   fi
 
   pythons="$(common_entries uv-python)"
   if [[ -n "$pythons" ]]; then
     if command -v uv >/dev/null 2>&1; then
-      installed="$(uv python list --only-installed 2>/dev/null || true)"
       for v in $pythons; do
-        if printf '%s\n' "$installed" | grep -q "^cpython-$v\."; then
-          info "Python $v already installed."
+        if uv python list --only-installed 2>/dev/null | grep -q "^cpython-$v\."; then
+          result ok "Python $v"
         else
           info "uv python install $v"
-          run uv python install "$v"
+          run_retry uv python install "$v" || true
+          if [[ "$DRY_RUN" == true ]]; then result changed "Python $v" "dry run"
+          elif uv python list --only-installed 2>/dev/null | grep -q "^cpython-$v\."; then result changed "Python $v"
+          else result failed "Python $v" "uv python install did not install it"; fi
         fi
       done
     else
-      warn "uv not on PATH; skipping Python. Run the packages layer first."
+      result flagged "uv Pythons" "uv not on PATH; open a new shell after the packages layer and re-run --only tooling"
     fi
   fi
 
@@ -374,18 +494,20 @@ layer_tooling() {
   if [[ -n "$uv_tools" ]]; then
     if command -v uv >/dev/null 2>&1; then
       # `uv tool list` prints "<name> v<version>" for each tool, then its executables.
-      present=" $(uv tool list 2>/dev/null | awk '$2 ~ /^v/ { print tolower($1) }' | tr '\n' ' ') "
       for tool in $uv_tools; do
         lower=$(printf '%s' "$tool" | tr '[:upper:]' '[:lower:]')
-        if in_set "$lower" "$present"; then
-          info "uv tool $tool already installed."
+        if in_set "$lower" "$(uv_tools_installed)"; then
+          result ok "uv tool $tool"
         else
           info "uv tool install $tool"
-          run uv tool install "$tool"
+          run_retry uv tool install "$tool" || true
+          if [[ "$DRY_RUN" == true ]]; then result changed "uv tool $tool" "dry run"
+          elif in_set "$lower" "$(uv_tools_installed)"; then result changed "uv tool $tool"
+          else result failed "uv tool $tool" "uv tool install did not install it"; fi
         fi
       done
     else
-      warn "uv not on PATH; skipping uv tools. Run the packages layer first."
+      result flagged "uv tools" "uv not on PATH; open a new shell after the packages layer and re-run --only tooling"
     fi
   fi
 
@@ -394,13 +516,16 @@ layer_tooling() {
   if in_set rust "$PROFILES"; then
     if command -v rustup >/dev/null 2>&1; then
       if rustup default >/dev/null 2>&1; then
-        info "Rust toolchain present ($(rustup default 2>/dev/null))."
+        result ok "Rust toolchain"
       else
         info "rustup default stable"
-        run rustup default stable
+        run_retry rustup default stable || true
+        if [[ "$DRY_RUN" == true ]]; then result changed "Rust toolchain" "dry run"
+        elif rustup default >/dev/null 2>&1; then result changed "Rust toolchain"
+        else result failed "Rust toolchain" "rustup default stable failed"; fi
       fi
     else
-      warn "rustup not on PATH; skipping the Rust toolchain. Run the packages layer first."
+      result flagged "Rust toolchain" "rustup not on PATH; open a new shell after the packages layer and re-run --only tooling"
     fi
   fi
 
@@ -423,7 +548,7 @@ layer_extensions() {
   ids="$(common_entries vscode)"
   [[ -n "$ids" ]] || { info "No extensions in the selected profiles."; return 0; }
   if ! command -v code >/dev/null 2>&1; then
-    warn "VS Code CLI ('code') not on PATH; skipping. Open a new shell after the packages layer."
+    result flagged "VS Code extensions" "code not on PATH; open a new shell after the packages layer and re-run --only extensions"
     return 0
   fi
 
@@ -435,28 +560,44 @@ layer_extensions() {
     total=$((total + 1))
     lower=$(printf '%s' "$id" | tr '[:upper:]' '[:lower:]')
     if in_set "$lower" "$present"; then
+      result ok "VS Code extension $id"
       already=$((already + 1)); continue
     fi
+    run_retry code --install-extension "$id" </dev/null >/dev/null 2>&1 || true
     if [[ "$DRY_RUN" == true ]]; then
       printf "  + code --install-extension %s\n" "$id"
+      result changed "VS Code extension $id" "dry run"
       added=$((added + 1))
-    elif code --install-extension "$id" </dev/null >/dev/null 2>&1; then
+    elif code --list-extensions 2>/dev/null | tr '[:upper:]' '[:lower:]' | grep -qx "$lower"; then
       printf "  installed %s\n" "$id"
+      result changed "VS Code extension $id"
       added=$((added + 1))
     else
-      warn "  failed: $id"
+      result failed "VS Code extension $id" "usually an extension that was unpublished or renamed"
       failed=$((failed + 1))
     fi
   done
 
   info "VS Code: $total listed, $already already present, $added installed, $failed failed."
-  [[ $failed -gt 0 ]] && warn "Failures are usually extensions that were unpublished or renamed."
   return 0
 }
 
 # --- Main --------------------------------------------------------------------
 
 main() {
+  # One run at a time: two runs would race over the same brew installs. mkdir
+  # is atomic, so it doubles as the lock.
+  if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    error "Another install.sh is already running (lock: $LOCK_DIR). If none is, remove that directory."
+    exit 3
+  fi
+  trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
+
+  # A log of every run, dry runs included, for when the terminal has scrolled away.
+  mkdir -p "$LOG_DIR"
+  log_file="$LOG_DIR/install-$RUN_STAMP.log"
+  exec > >(tee -a "$log_file") 2>&1
+
   if [[ "$DRY_RUN" == true ]]; then
     info "DRY RUN - nothing is changed. Mutating commands are printed with '+'."
   fi
@@ -473,11 +614,14 @@ main() {
   if wants tooling;    then layer_tooling;    fi
   if wants extensions; then layer_extensions; fi
 
-  step "Done"
+  summary
+  printf '\n'
   if [[ -d "$BACKUP_DIR" ]]; then
     info "Replaced dotfiles were backed up to $BACKUP_DIR"
   fi
+  info "Log: $log_file"
   info "Open a new terminal, or run: exec zsh -l"
+  if [[ $N_FAILED -gt 0 ]]; then exit 1; fi
 }
 
 main "$@"

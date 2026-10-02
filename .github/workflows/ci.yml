@@ -1,0 +1,121 @@
+name: CI
+
+# Runs both installers on clean GitHub-hosted machines, which is the one thing
+# no dry run can prove. Each job installs core plus a few profiles, runs the
+# installer a second time and requires it to change nothing, then checks from
+# a fresh shell that the toolchains actually work.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Weekly, to catch renamed winget ids and Homebrew formulae with no commits here.
+    - cron: '0 6 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows (core, go, python, web)
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      # Windows PowerShell 5.1 on purpose: it is what a fresh machine has.
+      - name: Install
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File windows\install.ps1 -Profile go,python,web
+          if ($LASTEXITCODE -ne 0) { throw "install.ps1 exited $LASTEXITCODE" }
+
+      - name: Second run changes nothing
+        shell: powershell
+        run: |
+          $out = powershell -NoProfile -ExecutionPolicy Bypass -File windows\install.ps1 -Profile go,python,web 2>&1 | Out-String
+          $out
+          if ($LASTEXITCODE -ne 0) { throw "second run exited $LASTEXITCODE" }
+          if ($out -notmatch ', 0 changed, 0 failed,') { throw 'second run was not idempotent; see its summary above' }
+
+      - name: Toolchains work from a fresh shell
+        shell: pwsh
+        run: |
+          $env:Path = @([Environment]::GetEnvironmentVariable('Path', 'Machine'),
+                        [Environment]::GetEnvironmentVariable('Path', 'User')) -join ';'
+          $ErrorActionPreference = 'Stop'
+          function Check([string]$what, [scriptblock]$cmd) {
+            $out = & $cmd 2>&1 | Out-String
+            if ($LASTEXITCODE -ne 0) { throw "$what failed: $out" }
+            "ok  $what  $($out.Trim() -split "`n" | Select-Object -First 1)"
+          }
+          Check 'git'        { git --version }
+          Check 'gh'         { gh --version }
+          Check 'rg'         { rg --version }
+          Check 'starship'   { starship --version }
+          Check 'go'         { go version }
+          Check 'gopls'      { gopls version }
+          Check 'node'       { node --version }
+          Check 'pnpm'       { pnpm --version }
+          Check 'uv python'  { uv run --python 3.13 python -c "import sys; print(sys.version)" }
+          Check 'pre-commit' { pre-commit --version }
+          $branch = git config --global --includes init.defaultBranch
+          if ($branch -ne 'main') { throw "init.defaultBranch is '$branch', expected main (is ~/.gitconfig linked?)" }
+          "ok  gitconfig linked (init.defaultBranch=main)"
+
+      - name: Upload install logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-install-logs
+          path: ~/.machines-setups/logs/
+          if-no-files-found: ignore
+
+  macos:
+    name: macOS (core, go, python, web)
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install
+        run: macos/install.sh --profile go,python,web
+
+      - name: Second run changes nothing
+        run: |
+          out="$(macos/install.sh --profile go,python,web 2>&1)" || { printf '%s\n' "$out"; exit 1; }
+          printf '%s\n' "$out"
+          printf '%s\n' "$out" | grep -q ', 0 changed, 0 failed,' \
+            || { echo 'second run was not idempotent; see its summary above'; exit 1; }
+
+      - name: Toolchains work from a fresh login shell
+        shell: zsh -l {0}
+        run: |
+          set -e
+          git --version
+          gh --version | head -n 1
+          rg --version | head -n 1
+          starship --version | head -n 1
+          go version
+          "$(go env GOPATH)/bin/gopls" version
+          node --version
+          pnpm --version
+          uv run --python 3.13 python -c "import sys; print(sys.version)"
+          pre-commit --version
+          branch="$(git config --global --includes init.defaultBranch)"
+          [ "$branch" = main ] || { echo "init.defaultBranch is '$branch', expected main"; exit 1; }
+          echo "ok  gitconfig linked (init.defaultBranch=main)"
+
+      - name: Upload install logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-install-logs
+          path: ~/.machines-setups/logs/
+          if-no-files-found: ignore

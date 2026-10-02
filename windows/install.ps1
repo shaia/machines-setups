@@ -43,10 +43,22 @@ param(
 Set-StrictMode -Version 2
 $ErrorActionPreference = 'Stop'
 
+# winget writes UTF-8. Windows PowerShell 5.1 decodes child output with the ANSI
+# code page and turns winget's progress spinner into scrolling garbage. Some
+# hosts (redirected CI output) refuse the assignment; that is only cosmetic.
+try {
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    [Console]::OutputEncoding = $utf8
+    $OutputEncoding = $utf8
+}
+catch { }
+
 $ScriptDir = $PSScriptRoot
+$LogDir = Join-Path $HOME '.machines-setups\logs'
+$RunStamp = Get-Date -Format yyyyMMdd-HHmmss
 $RepoRoot = Split-Path -Parent $ScriptDir
 $CommonDir = Join-Path $RepoRoot 'common'
-$BackupDir = Join-Path $HOME ".dotfiles-backup-$(Get-Date -Format yyyyMMdd-HHmmss)"
+$BackupDir = Join-Path $HOME ".dotfiles-backup-$RunStamp"
 # Honours a Documents folder redirected into OneDrive, which is where
 # PowerShell itself looks for profiles.
 $Documents = [Environment]::GetFolderPath('MyDocuments')
@@ -110,6 +122,71 @@ function Run {
     }
     if ($null -eq $code) { $code = 0 }
     return $code
+}
+
+# Run with retries for network-bound commands (winget, go, npm, uv, code):
+# three attempts, 5 then 15 seconds apart. A dry run never retries, because
+# Run returns 0 there.
+function RunRetry {
+    param([Parameter(Mandatory)][string[]]$Command)
+    $delays = @(5, 15)
+    $code = Run $Command
+    $attempt = 0
+    while ($code -ne 0 -and $attempt -lt $delays.Count) {
+        Write-Warn "  '$($Command[0..([Math]::Min(2, $Command.Count - 1))] -join ' ')' exited $code; retrying in $($delays[$attempt])s."
+        Start-Sleep -Seconds $delays[$attempt]
+        $code = Run $Command
+        $attempt++
+    }
+    return $code
+}
+
+# --- Results -------------------------------------------------------------------
+#
+# Every step records one outcome, printed as a summary at the end:
+#   ok       already in the desired state; nothing ran
+#   changed  applied, and the re-check after applying confirmed it
+#   failed   applied, but the re-check still fails (or the command failed)
+#   flagged  best-effort work that could not be done here; the run continues
+#   manual   needs something this script deliberately does not do (elevation)
+# Only `failed` makes the script exit non-zero.
+
+$script:Results = New-Object System.Collections.ArrayList
+$script:ElevatedCommands = New-Object System.Collections.ArrayList
+
+function Add-Result {
+    param([ValidateSet('ok', 'changed', 'failed', 'flagged', 'manual')][string]$Status, [string]$Name, [string]$Detail = '')
+    [void]$script:Results.Add([pscustomobject]@{ Status = $Status; Name = $Name; Detail = $Detail })
+}
+
+# A machine-wide setting this shell cannot apply: queue its command for the
+# "run these elevated" block at the end, and record it as manual.
+function Add-ElevatedCommand {
+    param([string]$Name, [string]$Command)
+    [void]$script:ElevatedCommands.Add($Command)
+    Add-Result manual $Name 'needs an elevated shell'
+}
+
+function Write-Summary {
+    Write-Step "Summary"
+    $counts = [ordered]@{ ok = 0; changed = 0; failed = 0; flagged = 0; manual = 0 }
+    foreach ($r in $script:Results) { $counts[$r.Status]++ }
+    Write-Host ("  {0} already fine, {1} changed, {2} failed, {3} flagged, {4} manual" -f
+        $counts['ok'], $counts['changed'], $counts['failed'], $counts['flagged'], $counts['manual'])
+    foreach ($status in @('failed', 'flagged', 'manual')) {
+        foreach ($r in @($script:Results | Where-Object { $_.Status -eq $status })) {
+            $line = "  [$($status.ToUpperInvariant())] $($r.Name)"
+            if ($r.Detail) { $line += " - $($r.Detail)" }
+            if ($status -eq 'failed') { Write-Host $line -ForegroundColor Red }
+            else { Write-Host $line -ForegroundColor Yellow }
+        }
+    }
+    if ($script:ElevatedCommands.Count -gt 0) {
+        Write-Host ""
+        Write-Host "  Run these once from an elevated PowerShell (or prefix each with gsudo or sudo):"
+        foreach ($c in $script:ElevatedCommands) { Write-Host "    $c" }
+    }
+    return $counts['failed']
 }
 
 # For PowerShell-side mutations (New-Item, Move-Item) that have no argv form.
@@ -371,7 +448,12 @@ function Invoke-Preflight {
 # `winget export` is the only view that is not a truncated fixed-width table.
 function Get-WingetInstalled {
     $tmp = Join-Path $env:TEMP "winget-export-$PID.json"
-    $r = Invoke-Capture @('winget', 'export', '-o', $tmp, '--accept-source-agreements', '--disable-interactivity')
+    # winget's source refresh is network-bound and occasionally fails; one retry.
+    foreach ($attempt in 1..2) {
+        $r = Invoke-Capture @('winget', 'export', '-o', $tmp, '--accept-source-agreements', '--disable-interactivity')
+        if (Test-Path -LiteralPath $tmp) { break }
+        if ($attempt -eq 1) { Write-Warn "winget export failed (exit $($r.ExitCode)); retrying in 10s."; Start-Sleep -Seconds 10 }
+    }
     if (-not (Test-Path -LiteralPath $tmp)) { throw "winget export produced no file (exit $($r.ExitCode))." }
     $json = Get-Content -LiteralPath $tmp -Raw | ConvertFrom-Json
     Remove-Item -LiteralPath $tmp -Force
@@ -382,100 +464,181 @@ function Get-WingetInstalled {
     return $keys
 }
 
+# winget's own answer for one id: exit code 0 when it is installed.
+function Test-WingetInstalled {
+    param([string]$Id)
+    $r = Invoke-Capture @('winget', 'list', '--id', $Id, '--exact', '--accept-source-agreements', '--disable-interactivity')
+    return ($r.ExitCode -eq 0)
+}
+
 function Invoke-LayerPackages {
     Write-Step "winget packages"
 
-    $ids = @(Get-ProfileEntries 'winget')
-    if ($ids.Count -eq 0) {
-        Write-Info "No winget packages in the selected profiles."
-        return
-    }
+    # The Visual C++ runtime many tools link against (uv among them), for the
+    # machine's own architecture. Not in a profile file because the id differs
+    # per architecture.
+    $arch = 'x64'
+    if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { $arch = 'arm64' }
+    $ids = @("Microsoft.VCRedist.2015+.$arch") + @(Get-ProfileEntries 'winget')
     Write-Info "$($ids.Count) packages across: $($SelectedProfiles -join ', ')."
-    Write-Info "Asking winget what is installed (winget export; read-only, takes a while)."
+    Write-Info "Asking winget what is installed (winget export; read-only)."
     $present = @(Get-WingetInstalled)
 
     $already = 0; $added = 0; $failed = 0
     foreach ($id in $ids) {
-        if ($present -contains $id.ToLowerInvariant()) { $already++; continue }
+        $name = "winget $id"
+        if ($present -contains $id.ToLowerInvariant()) { Add-Result ok $name; $already++; continue }
         # Installing a package winget already knows would upgrade it; the
         # presence check above is what keeps this a no-upgrade install.
-        $code = Run @('winget', 'install', '--id', $id, '--exact', '--source', 'winget',
+        $code = RunRetry @('winget', 'install', '--id', $id, '--exact', '--source', 'winget',
             '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity')
-        if ($code -eq 0) { $added++ } else { Write-Warn "  failed ($code): $id"; $failed++ }
+        if ($DryRun) { Add-Result changed $name 'dry run'; $added++; continue }
+        # Verify rather than trust the exit code: some installers report a
+        # pending reboot as failure, and some failures exit 0.
+        if (Test-WingetInstalled $id) { Add-Result changed $name; $added++ }
+        else {
+            Add-Result failed $name "winget exited $code and does not list it; 'winget search' finds a renamed id"
+            $failed++
+        }
     }
     Write-Info "winget: $($ids.Count) listed, $already already present, $added installed, $failed failed."
-    if ($failed -gt 0) {
-        Write-Warn "Failures are usually an installer that insists on a prompt, or an id that was renamed;"
-        Write-Warn "'winget search <name>' finds the current id."
-    }
     if ($added -gt 0 -and -not $DryRun) { Update-SessionPath }
 }
 
+
 # --- Layer: system -----------------------------------------------------------
 #
-# Windows settings every developer machine wants. Per-user settings are applied
-# directly; machine-wide ones only from an elevated shell, otherwise the exact
-# command is printed (gsudo comes with core), because nothing here elevates
-# itself.
+# Windows settings every developer machine wants. Each is checked, applied, and
+# checked again. Per-user settings are applied directly. Machine-wide ones are
+# applied only from an elevated shell; otherwise their commands are collected
+# for the summary, because nothing here elevates itself.
+
+# A registry key created only when missing: New-Item -Force on an existing
+# registry key replaces it, values and subkeys included.
+function Initialize-RegistryKey {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { New-Item -Path $Path -Force | Out-Null }
+}
+
+function Get-RegistryValue {
+    param([string]$Path, [string]$Name)
+    $item = Get-ItemProperty -LiteralPath $Path -ErrorAction SilentlyContinue
+    if ($null -eq $item) { return $null }
+    $p = $item.PSObject.Properties[$Name]
+    if ($null -eq $p) { return $null }
+    return $p.Value
+}
+
+# Returns $true when it changed the value (or would, in a dry run).
+function Set-RegistrySetting {
+    param([string]$Label, [string]$Path, [string]$Name, [int]$Value, [switch]$Machine)
+
+    $current = Get-RegistryValue $Path $Name
+    if ($null -ne $current -and [int]$current -eq $Value) {
+        Add-Result ok $Label
+        return $false
+    }
+    if ($Machine -and -not $script:Elevated) {
+        $cmd = "Set-ItemProperty -Path '$Path' -Name $Name -Value $Value -Type DWord"
+        if (-not (Test-Path -LiteralPath $Path)) { $cmd = "New-Item -Path '$Path' -Force | Out-Null; $cmd" }
+        Add-ElevatedCommand $Label $cmd
+        return $false
+    }
+    RunBlock "Set $Path $Name = $Value" {
+        Initialize-RegistryKey $Path
+        Set-ItemProperty -LiteralPath $Path -Name $Name -Value $Value -Type DWord
+    }
+    if ($DryRun) { Add-Result changed $Label 'dry run'; return $true }
+    $after = Get-RegistryValue $Path $Name
+    if ($null -ne $after -and [int]$after -eq $Value) { Add-Result changed $Label }
+    else { Add-Result failed $Label "wrote $Name = $Value but it reads back as '$after'" }
+    return $true
+}
 
 function Invoke-LayerSystem {
     Write-Step "Windows settings"
 
-    # File Explorer shows file extensions: "report.pdf.exe" stops looking like a PDF,
-    # and renaming .txt to .ps1 actually changes the type.
-    $adv = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'
-    $hide = (Get-ItemProperty -Path $adv -ErrorAction SilentlyContinue).PSObject.Properties['HideFileExt']
-    if ($null -ne $hide -and $hide.Value -eq 0) {
-        Write-Info "File Explorer already shows file extensions."
+    $explorer = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer'
+    $explorerChanged = $false
+
+    # File Explorer: show extensions ("report.pdf.exe" stops looking like a PDF),
+    # hidden files (.git, .vscode, .env), and the full path in the title bar.
+    $explorerChanged = (Set-RegistrySetting 'Explorer shows file extensions' "$explorer\Advanced" 'HideFileExt' 0) -or $explorerChanged
+    $explorerChanged = (Set-RegistrySetting 'Explorer shows hidden files' "$explorer\Advanced" 'Hidden' 1) -or $explorerChanged
+    $explorerChanged = (Set-RegistrySetting 'Explorer shows the full path in the title bar' "$explorer\CabinetState" 'FullPath' 1) -or $explorerChanged
+    # Taskbar: "End Task" on right-click, which kills a hung process without Task Manager.
+    $explorerChanged = (Set-RegistrySetting 'Taskbar right-click offers End Task' "$explorer\Advanced\TaskbarDeveloperSettings" 'TaskbarEndTask' 1) -or $explorerChanged
+    # Start search finds local files and apps, not Bing results.
+    $explorerChanged = (Set-RegistrySetting 'Start search shows no web results' 'HKCU:\Software\Policies\Microsoft\Windows\Explorer' 'DisableSearchBoxSuggestions' 1) -or $explorerChanged
+    if ($explorerChanged) { Write-Info "Explorer and taskbar changes show after signing out and back in, or restarting Explorer." }
+
+    # Machine-wide. Long paths: deep node_modules, CMake and vcpkg build trees
+    # exceed 260 characters and fail with "path not found"; core.longpaths in
+    # common/git/gitconfig covers git, which ignores this setting.
+    $null = Set-RegistrySetting 'Long path support' 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' 'LongPathsEnabled' 1 -Machine
+    # Developer Mode: file symlinks without elevation, which the dotfiles layer uses.
+    $null = Set-RegistrySetting 'Developer Mode' 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock' 'AllowDevelopmentWithoutDevLicense' 1 -Machine
+    # Windows' own sudo, inline mode (runs in the current window). Builds without
+    # sudo.exe skip this; gsudo from core covers them.
+    if (Test-Path -LiteralPath (Join-Path $env:SystemRoot 'System32\sudo.exe')) {
+        $null = Set-RegistrySetting 'Windows sudo, inline mode' 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Sudo' 'Enabled' 3 -Machine
     }
     else {
-        RunBlock "Set HKCU\...\Explorer\Advanced HideFileExt = 0" {
-            Set-ItemProperty -Path $adv -Name HideFileExt -Value 0 -Type DWord
-        }
-        Write-Info "File Explorer now shows file extensions (open windows pick it up after an Explorer restart)."
+        Write-Info "This Windows build has no built-in sudo; gsudo from core covers it."
     }
 
-    # Paths longer than 260 characters. Deep node_modules, CMake build trees and
-    # vcpkg buildtrees exceed it and fail with "path not found". Machine-wide, so
-    # it needs elevation; core.longpaths in common/git/gitconfig covers git, which
-    # ignores this setting.
-    $fs = 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem'
-    $long = (Get-ItemProperty -Path $fs).PSObject.Properties['LongPathsEnabled']
-    if ($null -ne $long -and $long.Value -eq 1) {
-        Write-Info "Long path support is already on."
-    }
-    elseif ($script:Elevated) {
-        RunBlock "Set HKLM\...\FileSystem LongPathsEnabled = 1" {
-            Set-ItemProperty -Path $fs -Name LongPathsEnabled -Value 1 -Type DWord
-        }
-        Write-Info "Long path support is on (processes started from now on see it)."
-    }
-    else {
-        Write-Warn "Long path support is off, and turning it on needs elevation. Run once:"
-        Write-Host "    gsudo Set-ItemProperty -Path $fs -Name LongPathsEnabled -Value 1 -Type DWord"
-    }
+    Invoke-WslSetup
+}
 
-    # WSL 2 with a Linux distro. `wsl --status` fails until the platform (the
-    # Virtual Machine Platform feature) is enabled, which needs elevation and a
-    # reboot. Distros are read from the registry: `wsl -l` prints UTF-16.
-    $null = Invoke-Capture @('wsl.exe', '--status')
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warn "WSL is not enabled yet. Run once, elevated, then reboot and re-run -Only system:"
-        Write-Host "    gsudo wsl --install --no-distribution"
+# WSL 2 with a Linux distro. Best-effort: a machine without hardware
+# virtualization (or a VM without nested virtualization) cannot run it, and
+# that must not fail the whole run.
+function Invoke-WslSetup {
+    $status = Invoke-Capture @('wsl.exe', '--status')
+    if ($status.ExitCode -ne 0) {
+        $cs = Get-CimInstance Win32_ComputerSystem -ErrorAction SilentlyContinue
+        $cpu = Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1
+        # With a hypervisor already running, the processor reports firmware
+        # virtualization as off, so a present hypervisor settles it first.
+        $hypervisor = ($null -ne $cs -and $cs.HypervisorPresent)
+        $firmware = ($null -ne $cpu -and $cpu.VirtualizationFirmwareEnabled)
+        if (-not $hypervisor -and -not $firmware) {
+            Add-Result flagged 'WSL 2' ('hardware virtualization is off: enable VT-x/AMD-V in the BIOS/UEFI, ' +
+                'or on a VM expose nested virtualization (Hyper-V: Set-VMProcessor -ExposeVirtualizationExtensions $true)')
+            return
+        }
+        Add-ElevatedCommand 'WSL 2 platform' ('wsl --install --no-distribution   # then reboot and re-run -Only system. ' +
+            'If that is unavailable: dism /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart; ' +
+            'dism /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart')
         return
     }
-    $distros = @(Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss' -ErrorAction SilentlyContinue |
-        ForEach-Object { (Get-ItemProperty $_.PSPath).DistributionName } |
-        Where-Object { $_ -and $_ -notlike 'docker-desktop*' })
+
+    # Distros are read from the registry: `wsl -l` prints UTF-16. Docker
+    # Desktop's own distros do not count.
+    $distros = @(Get-WslDistros)
     if ($distros.Count -gt 0) {
-        Write-Info "WSL 2 is enabled with: $($distros -join ', ')."
+        Add-Result ok "WSL 2 distro ($($distros -join ', '))"
+        return
     }
-    else {
-        Write-Info "WSL 2 is enabled but has no distro; installing $WslDistro."
-        $code = Run @('wsl.exe', '--install', '-d', $WslDistro, '--no-launch')
-        if ($code -eq 0) { Write-Info "$WslDistro installed; launch it once from the Start menu to create your Linux user." }
-        else { Write-Warn "  wsl --install -d $WslDistro exited $code." }
+    Write-Info "WSL 2 is enabled but has no distro; installing $WslDistro."
+    $code = RunRetry @('wsl.exe', '--install', '-d', $WslDistro, '--no-launch')
+    if ($code -ne 0 -and -not $DryRun) {
+        # The Store route fails on machines without Store access.
+        Write-Warn "  Store install exited $code; retrying with --web-download."
+        $code = Run @('wsl.exe', '--install', '-d', $WslDistro, '--no-launch', '--web-download')
     }
+    if ($DryRun) { Add-Result changed "WSL 2 distro $WslDistro" 'dry run'; return }
+    if (@(Get-WslDistros) -contains $WslDistro) {
+        Add-Result changed "WSL 2 distro $WslDistro" 'launch it once from the Start menu to create your Linux user'
+    }
+    else { Add-Result flagged "WSL 2 distro $WslDistro" "wsl --install exited $code" }
+}
+
+function Get-WslDistros {
+    return @(Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss' -ErrorAction SilentlyContinue |
+        ForEach-Object { (Get-ItemProperty $_.PSPath).PSObject.Properties['DistributionName'] } |
+        Where-Object { $null -ne $_ } | ForEach-Object { $_.Value } |
+        Where-Object { $_ -and $_ -notlike 'docker-desktop*' })
 }
 
 # --- Layer: vs ---------------------------------------------------------------
@@ -499,14 +662,13 @@ function Invoke-LayerVs {
     $vswhere = Join-Path $installer 'vswhere.exe'
     $setup = Join-Path $installer 'setup.exe'
     if (-not ((Test-Path -LiteralPath $vswhere) -and (Test-Path -LiteralPath $setup))) {
-        Write-Warn "Visual Studio Installer not found; the packages layer installs Visual Studio."
-        Write-Warn "Re-run with the same -Profile and -Only vs afterwards."
+        Add-Result flagged 'Visual Studio workloads' 'Visual Studio Installer not found yet; re-run with the same -Profile and -Only vs after the packages layer'
         return
     }
 
     $installPath = (Invoke-Capture @($vswhere, '-products', $VsProductId, '-version', $VsVersionRange, '-property', 'installationPath')).Output | Select-Object -First 1
     if (-not $installPath) {
-        Write-Warn "Visual Studio 2026 Community is not installed; the packages layer installs it."
+        Add-Result flagged 'Visual Studio workloads' 'Visual Studio 2026 Community is not installed yet; re-run -Only vs after the packages layer'
         return
     }
 
@@ -516,12 +678,14 @@ function Invoke-LayerVs {
         $query = @($vswhere, '-products', $VsProductId, '-version', $VsVersionRange, '-requires') + $components + @('-property', 'installationPath')
         $satisfied = (Invoke-Capture $query).Output | Select-Object -First 1
         if ($satisfied) {
-            Write-Info "${name}: all $($components.Count) components present."
+            Add-Result ok "Visual Studio $name ($($components.Count) components)"
             continue
         }
         Write-Info "${name}: adding missing components (the installer elevates itself and may prompt)."
         $code = Run @($setup, 'modify', '--installPath', $installPath, '--config', $cfg, '--passive', '--norestart')
-        if ($code -ne 0) { Write-Warn "  setup.exe modify exited $code for $name." }
+        if ($DryRun) { Add-Result changed "Visual Studio $name" 'dry run'; continue }
+        if ((Invoke-Capture $query).Output | Select-Object -First 1) { Add-Result changed "Visual Studio $name" }
+        else { Add-Result failed "Visual Studio $name" "setup.exe modify exited $code and components are still missing; close Visual Studio and re-run -Only vs" }
     }
 }
 
@@ -553,8 +717,9 @@ function New-FileLink {
     param([string]$Source, [string]$Target)
 
     $item = Get-Item -LiteralPath $Target -Force -ErrorAction SilentlyContinue
+    $label = "link $Target"
     if (Test-LinkedTo -Item $item -Source $Source -LinkTypes @('SymbolicLink')) {
-        Write-Info "$(Split-Path -Leaf $Target) already linked."
+        Add-Result ok $label
         return
     }
     if ($null -ne $item) { Backup-Path $Target }
@@ -566,8 +731,10 @@ function New-FileLink {
     # cmd's mklink honours Developer Mode without elevation; New-Item does not
     # under Windows PowerShell.
     $code = Run @('cmd', '/c', 'mklink', $Target, $Source) -Quiet
-    if ($code -eq 0) { Write-Info "Linked $Target -> $Source" }
-    else { Write-Err "mklink failed ($code) for $Target" }
+    if ($DryRun) { Add-Result changed $label 'dry run'; return }
+    $after = Get-Item -LiteralPath $Target -Force -ErrorAction SilentlyContinue
+    if (Test-LinkedTo -Item $after -Source $Source -LinkTypes @('SymbolicLink')) { Add-Result changed $label }
+    else { Add-Result failed $label "mklink exited $code; the original is in $BackupDir" }
 }
 
 # Sets Windows Terminal's default profile to PowerShell 7 and its font to the
@@ -578,18 +745,17 @@ function New-FileLink {
 function Set-TerminalDefaults {
     $settings = Join-Path $WindowsTerminalState 'settings.json'
     if (-not (Test-Path -LiteralPath $settings)) {
-        Write-Warn "Windows Terminal has not been launched yet (no settings.json); launch it once, then re-run -Only dotfiles."
+        Add-Result flagged 'Windows Terminal defaults' 'not launched yet (no settings.json); launch it once, then re-run -Only dotfiles'
         return
     }
     try { $json = Get-Content -LiteralPath $settings -Raw | ConvertFrom-Json }
     catch {
-        Write-Warn "Windows Terminal settings.json is not plain JSON (comments?); set the default profile to PowerShell"
-        Write-Warn "and the font to '$NerdFontFace' in Terminal's Settings instead."
+        Add-Result flagged 'Windows Terminal defaults' "settings.json is not plain JSON (comments?); set PowerShell and '$NerdFontFace' in Terminal's Settings"
         return
     }
     $profilesProp = $json.PSObject.Properties['profiles']
     if ($null -eq $profilesProp -or $profilesProp.Value -is [array]) {
-        Write-Warn "Windows Terminal settings.json uses an old layout; set the default profile and font in Terminal's Settings."
+        Add-Result flagged 'Windows Terminal defaults' "settings.json uses an old layout; set the default profile and font in Terminal's Settings"
         return
     }
 
@@ -605,7 +771,7 @@ function Set-TerminalDefaults {
     if ($face -ne $NerdFontFace) { $changes += "font -> $NerdFontFace" }
 
     if ($changes.Count -eq 0) {
-        Write-Info "Windows Terminal already defaults to PowerShell with $NerdFontFace."
+        Add-Result ok 'Windows Terminal defaults (PowerShell, Nerd Font)'
         return
     }
     Backup-Path $settings -Copy
@@ -619,7 +785,7 @@ function Set-TerminalDefaults {
         $text = $json | ConvertTo-Json -Depth 32
         [IO.File]::WriteAllText($settings, $text, (New-Object System.Text.UTF8Encoding($false)))
     }
-    Write-Info "Windows Terminal: $($changes -join ', ')."
+    Add-Result changed 'Windows Terminal defaults' ($changes -join ', ')
 }
 
 function Invoke-LayerDotfiles {
@@ -646,9 +812,8 @@ function Invoke-LayerDotfiles {
         }
     }
     else {
-        Write-Err "This shell cannot create file symlinks: it is not elevated and Developer Mode is off."
-        Write-Err "Turn on Settings > System > For developers > Developer Mode (or open an elevated"
-        Write-Err "shell), then re-run with: .\install.ps1 -Only dotfiles"
+        Add-Result manual 'dotfile links' ('this shell cannot create file symlinks: turn on Developer Mode (the system ' +
+            'layer queues the command) or run elevated, then re-run -Only dotfiles')
     }
 
     Set-TerminalDefaults
@@ -695,95 +860,91 @@ function Get-GoBinaryName {
 function Invoke-LayerTooling {
     Write-Step "PowerShell modules, Go tools, npm globals, uv Pythons and tools"
 
-    # Installed from inside pwsh 7 so they land on its module path; the user
-    # module path of Windows PowerShell is invisible to pwsh.
-    $modules = @(Get-ProfileEntries 'psmodule')
-    if ($modules.Count -gt 0) {
-        if (Test-Command pwsh) {
-            $present = @((Invoke-Capture @('pwsh', '-NoProfile', '-NonInteractive', '-Command',
-                'Get-InstalledPSResource -Scope CurrentUser | Select-Object -ExpandProperty Name')).Output |
-                ForEach-Object { $_.ToLowerInvariant() })
-            foreach ($name in $modules) {
-                if ($present -contains $name.ToLowerInvariant()) { Write-Info "PowerShell module $name already installed." }
-                else {
-                    Write-Info "Install-PSResource $name (in pwsh)"
-                    Run @('pwsh', '-NoProfile', '-NonInteractive', '-Command',
-                        "Install-PSResource -Name '$name' -Scope CurrentUser -Repository PSGallery -TrustRepository -Quiet") | Out-Null
-                }
+    # Each kind: what is installed now, how to install one, and the tool it
+    # needs on PATH. The same check runs again after installing.
+    $kinds = @(
+        @{
+            Kind = 'psmodule'; Needs = 'pwsh'; Label = 'PowerShell module'
+            # Installed from inside pwsh 7 so they land on its module path; the
+            # user module path of Windows PowerShell is invisible to pwsh.
+            List = { @((Invoke-Capture @('pwsh', '-NoProfile', '-NonInteractive', '-Command',
+                    'Get-InstalledPSResource -Scope CurrentUser | Select-Object -ExpandProperty Name')).Output) }
+            Install = { param($n) RunRetry @('pwsh', '-NoProfile', '-NonInteractive', '-Command',
+                    "Install-PSResource -Name '$n' -Scope CurrentUser -Repository PSGallery -TrustRepository -Quiet") }
+        },
+        @{
+            Kind = 'go'; Needs = 'go'; Label = 'go install'
+            List = {
+                $bin = Join-Path ((Invoke-Capture @('go', 'env', 'GOPATH')).Output | Select-Object -First 1) 'bin'
+                @(Get-ChildItem -LiteralPath $bin -File -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Extension -eq '.exe' } | ForEach-Object { $_.BaseName })
             }
-        }
-        else { Write-Warn "pwsh not on PATH; skipping PowerShell modules. Run the packages layer first." }
-    }
-
-    $goModules = @(Get-ProfileEntries 'go')
-    if ($goModules.Count -gt 0) {
-        if (Test-Command go) {
-            $goBin = Join-Path ((Invoke-Capture @('go', 'env', 'GOPATH')).Output | Select-Object -First 1) 'bin'
-            foreach ($module in $goModules) {
-                $name = Get-GoBinaryName $module
-                if (Test-Path -LiteralPath (Join-Path $goBin "$name.exe")) { Write-Info "$name already installed." }
-                else {
-                    Write-Info "go install $module"
-                    Run @('go', 'install', $module) | Out-Null
-                }
-            }
-        }
-        else { Write-Warn "go not on PATH; skipping Go tools. Run the packages layer first." }
-    }
-
-    $npmPackages = @(Get-ProfileEntries 'npm')
-    if ($npmPackages.Count -gt 0) {
-        if (Test-Command npm) {
-            $present = @()
-            $json = (Invoke-Capture @('npm', 'ls', '-g', '--depth=0', '--json')).Output -join "`n"
-            if ($json.Trim()) {
+            Key = { param($m) Get-GoBinaryName $m }
+            Install = { param($m) RunRetry @('go', 'install', $m) }
+        },
+        @{
+            Kind = 'npm'; Needs = 'npm'; Label = 'npm global'
+            List = {
+                $json = (Invoke-Capture @('npm', 'ls', '-g', '--depth=0', '--json')).Output -join "`n"
+                if (-not $json.Trim()) { return @() }
                 $tree = $json | ConvertFrom-Json
-                if ($tree.PSObject.Properties['dependencies']) { $present = @($tree.dependencies.PSObject.Properties.Name) }
+                if ($tree.PSObject.Properties['dependencies']) { return @($tree.dependencies.PSObject.Properties.Name) }
+                return @()
             }
-            foreach ($pkg in $npmPackages) {
-                if ($present -contains $pkg) { Write-Info "npm: $pkg already installed." }
-                else {
-                    Write-Info "npm install -g $pkg"
-                    Run @('npm', 'install', '-g', $pkg) | Out-Null
-                }
-            }
-        }
-        else { Write-Warn "npm not on PATH; skipping npm globals. Run the packages layer first." }
-    }
-
-    $pythons = @(Get-ProfileEntries 'uv-python')
-    if ($pythons.Count -gt 0) {
-        if (Test-Command uv) {
-            $installed = @((Invoke-Capture @('uv', 'python', 'list', '--only-installed')).Output)
-            foreach ($v in $pythons) {
-                if (@($installed | Where-Object { $_ -match "^cpython-$([regex]::Escape($v))\." }).Count -gt 0) {
-                    Write-Info "Python $v already installed."
-                }
-                else {
-                    Write-Info "uv python install $v"
-                    Run @('uv', 'python', 'install', $v) | Out-Null
-                }
-            }
-        }
-        else { Write-Warn "uv not on PATH; skipping Python. Run the packages layer first." }
-    }
-
-    # Command-line tools uv installs into their own isolated environments.
-    $uvTools = @(Get-ProfileEntries 'uv-tool')
-    if ($uvTools.Count -gt 0) {
-        if (Test-Command uv) {
+            Install = { param($p) RunRetry @('npm', 'install', '-g', $p) }
+        },
+        @{
+            Kind = 'uv-python'; Needs = 'uv'; Label = 'Python'
+            # "cpython-3.13.7-windows-x86_64-none ..." -> 3.13
+            List = { @((Invoke-Capture @('uv', 'python', 'list', '--only-installed')).Output |
+                    Where-Object { $_ -match '^cpython-(\d+\.\d+)\.' } | ForEach-Object { $Matches[1] }) }
+            Install = { param($v) RunRetry @('uv', 'python', 'install', $v) }
+        },
+        @{
+            Kind = 'uv-tool'; Needs = 'uv'; Label = 'uv tool'
             # `uv tool list` prints "<name> v<version>" for each tool, then its executables.
-            $installed = @((Invoke-Capture @('uv', 'tool', 'list')).Output |
-                Where-Object { $_ -match '^(\S+) v' } | ForEach-Object { $Matches[1].ToLowerInvariant() })
-            foreach ($tool in $uvTools) {
-                if ($installed -contains $tool.ToLowerInvariant()) { Write-Info "uv tool $tool already installed." }
-                else {
-                    Write-Info "uv tool install $tool"
-                    Run @('uv', 'tool', 'install', $tool) | Out-Null
-                }
-            }
+            List = { @((Invoke-Capture @('uv', 'tool', 'list')).Output |
+                    Where-Object { $_ -match '^(\S+) v' } | ForEach-Object { $Matches[1] }) }
+            Install = { param($t) RunRetry @('uv', 'tool', 'install', $t) }
         }
-        else { Write-Warn "uv not on PATH; skipping uv tools. Run the packages layer first." }
+    )
+
+    foreach ($k in $kinds) {
+        $entries = @(Get-ProfileEntries $k.Kind)
+        if ($entries.Count -eq 0) { continue }
+        if (-not (Test-Command $k.Needs)) {
+            Add-Result flagged "$($k.Label)s" "$($k.Needs) not on PATH; open a new shell after the packages layer and re-run -Only tooling"
+            continue
+        }
+        $present = @(& $k.List | ForEach-Object { ([string]$_).ToLowerInvariant() })
+        foreach ($entry in $entries) {
+            $key = $entry
+            if ($k.ContainsKey('Key')) { $key = & $k.Key $entry }
+            $label = "$($k.Label) $entry"
+            if ($present -contains $key.ToLowerInvariant()) { Add-Result ok $label; continue }
+            Write-Info "Installing $label"
+            $code = & $k.Install $entry
+            if ($DryRun) { Add-Result changed $label 'dry run'; continue }
+            $after = @(& $k.List | ForEach-Object { ([string]$_).ToLowerInvariant() })
+            if ($after -contains $key.ToLowerInvariant()) { Add-Result changed $label }
+            else { Add-Result failed $label "install exited $code and it is still not listed" }
+        }
+    }
+
+    # uv puts tool executables in ~\.local\bin, which a fresh machine does not
+    # have on PATH. update-shell adds it to the User PATH once; idempotent.
+    if (@(Get-ProfileEntries 'uv-tool').Count -gt 0 -and (Test-Command uv)) {
+        $uvBin = (Invoke-Capture @('uv', 'tool', 'dir', '--bin')).Output | Select-Object -First 1
+        $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+        if ($uvBin -and (@($userPath -split ';') -contains $uvBin)) { Add-Result ok "uv tool bin on PATH" }
+        else {
+            $null = Run @('uv', 'tool', 'update-shell')
+            if ($DryRun) { Add-Result changed "uv tool bin on PATH" 'dry run' }
+            elseif (@(([Environment]::GetEnvironmentVariable('Path', 'User')) -split ';') -contains $uvBin) {
+                Add-Result changed "uv tool bin on PATH" $uvBin
+            }
+            else { Add-Result failed "uv tool bin on PATH" "uv tool update-shell did not add $uvBin" }
+        }
     }
 
     Write-Step "Manual steps this script deliberately leaves to you"
@@ -791,7 +952,6 @@ function Invoke-LayerTooling {
     Write-Host "                         # this repo) over to ~\.gitconfig-local"
     Write-Host "  ~\.gitconfig-local     # your git identity; see the dotfiles layer's message"
     Write-Host "  ssh keys               # not in this repo; generate or restore your own"
-    Write-Host "  Developer Mode         # Settings > System > For developers; symlinks without elevation"
     Write-Host "  Warp settings          # Appearance > Prompt: honour the custom prompt (PS1), so starship shows;"
     Write-Host "                         # Appearance > Text: font JetBrainsMono Nerd Font"
     Write-Host "  Docker Desktop         # containers profile: launch once; it provisions its WSL distro"
@@ -830,48 +990,76 @@ function Invoke-LayerExtensions {
 
     $already = 0; $added = 0; $failed = 0
     foreach ($id in $ids) {
-        if ($present -contains $id.ToLowerInvariant()) { $already++; continue }
-        if ($DryRun) {
-            Write-Host "  + code --install-extension $id"
-            $added++
-            continue
-        }
-        $r = Invoke-Capture @('code', '--install-extension', $id)
-        if ($r.ExitCode -eq 0) { Write-Host "  installed $id"; $added++ }
-        else { Write-Warn "  failed: $id"; $failed++ }
+        $label = "VS Code extension $id"
+        if ($present -contains $id.ToLowerInvariant()) { Add-Result ok $label; $already++; continue }
+        $code = RunRetry @('code', '--install-extension', $id)
+        if ($DryRun) { Add-Result changed $label 'dry run'; $added++; continue }
+        $after = @((Invoke-Capture @('code', '--list-extensions')).Output | ForEach-Object { $_.ToLowerInvariant() })
+        if ($after -contains $id.ToLowerInvariant()) { Add-Result changed $label; $added++ }
+        else { Add-Result failed $label "exited $code; usually an extension that was unpublished or renamed"; $failed++ }
     }
     Write-Info "VS Code: $($ids.Count) listed, $already already present, $added installed, $failed failed."
-    if ($failed -gt 0) { Write-Warn "Failures are usually extensions that were unpublished or renamed." }
 }
 
 # --- Main --------------------------------------------------------------------
 
 function Invoke-Main {
-    if ($DryRun) {
-        Write-Info "DRY RUN - nothing is changed. Mutating commands are printed with '+'."
+    # One run at a time: two runs would race over the same winget installs.
+    $mutex = New-Object System.Threading.Mutex($false, 'Global\MachinesSetupsInstall')
+    $owned = $false
+    try { $owned = $mutex.WaitOne(0) }
+    catch [System.Threading.AbandonedMutexException] { $owned = $true }
+    if (-not $owned) {
+        Write-Err "Another install.ps1 is already running; let it finish, then re-run."
+        exit 3
     }
-    $layerText = $Layers -join ' '
-    if (-not $layerText) { $layerText = 'none' }
-    Write-Info "Profiles: $($SelectedProfiles -join ' ')"
-    if ($SelectedProfiles.Count -eq 1) {
-        Write-Info "  Core only. Add any of these with -Profile: $($AvailableProfiles -join ', ')"
+
+    # A transcript of every run, dry runs included, for when the console has scrolled away.
+    $logFile = Join-Path $LogDir "install-$RunStamp.log"
+    $transcribing = $false
+    try {
+        if (-not (Test-Path -LiteralPath $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
+        Start-Transcript -Path $logFile -Append | Out-Null
+        $transcribing = $true
     }
-    Write-Info "Layers: $layerText"
+    catch { Write-Warn "Could not start a transcript at ${logFile}: $($_.Exception.Message)" }
 
-    Invoke-Preflight
+    $failed = 0
+    try {
+        if ($DryRun) {
+            Write-Info "DRY RUN - nothing is changed. Mutating commands are printed with '+'."
+        }
+        $layerText = $Layers -join ' '
+        if (-not $layerText) { $layerText = 'none' }
+        Write-Info "Profiles: $($SelectedProfiles -join ' ')"
+        if ($SelectedProfiles.Count -eq 1) {
+            Write-Info "  Core only. Add any of these with -Profile: $($AvailableProfiles -join ', ')"
+        }
+        Write-Info "Layers: $layerText"
 
-    if (Wants 'packages')   { Invoke-LayerPackages }
-    if (Wants 'system')     { Invoke-LayerSystem }
-    if (Wants 'vs')         { Invoke-LayerVs }
-    if (Wants 'dotfiles')   { Invoke-LayerDotfiles }
-    if (Wants 'tooling')    { Invoke-LayerTooling }
-    if (Wants 'extensions') { Invoke-LayerExtensions }
+        Invoke-Preflight
 
-    Write-Step "Done"
-    if (Test-Path -LiteralPath $BackupDir) {
-        Write-Info "Replaced files were backed up to $BackupDir"
+        if (Wants 'packages')   { Invoke-LayerPackages }
+        if (Wants 'system')     { Invoke-LayerSystem }
+        if (Wants 'vs')         { Invoke-LayerVs }
+        if (Wants 'dotfiles')   { Invoke-LayerDotfiles }
+        if (Wants 'tooling')    { Invoke-LayerTooling }
+        if (Wants 'extensions') { Invoke-LayerExtensions }
+
+        $failed = Write-Summary
+        Write-Host ""
+        if (Test-Path -LiteralPath $BackupDir) {
+            Write-Info "Replaced files were backed up to $BackupDir"
+        }
+        if ($transcribing) { Write-Info "Log: $logFile" }
+        Write-Info "Open a new terminal: installers append to PATH, and this shell cannot see that."
     }
-    Write-Info "Open a new terminal: installers append to PATH, and this shell cannot see that."
+    finally {
+        if ($transcribing) { try { Stop-Transcript | Out-Null } catch { } }
+        $mutex.ReleaseMutex()
+        $mutex.Dispose()
+    }
+    if ($failed -gt 0) { exit 1 }
 }
 
 Invoke-Main
