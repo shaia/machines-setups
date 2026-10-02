@@ -19,7 +19,7 @@ Homebrew if it is missing. Then five layers run:
 | `packages` | `brew bundle --no-upgrade` for `profiles/core.Brewfile` and each selected profile's Brewfile |
 | `zsh` | Installs oh-my-zsh and makes zsh the login shell |
 | `dotfiles` | Backs up, then symlinks, `.zshrc`, `.zprofile`, `.gitconfig`, `.config/git/ignore` and `.config/starship.toml`. Also `.config/git/delta.gitconfig` once delta is installed |
-| `tooling` | `go install` tools, npm globals, `uv python install`, and `rustup default stable` |
+| `tooling` | `go install` tools, npm globals, `uv python install`, `uv tool install`, and `rustup default stable` |
 | `extensions` | VS Code extensions from `common/profiles/` |
 
 ## Things worth knowing
@@ -40,8 +40,15 @@ highlighting must be sourced last, so it is.
 oh-my-zsh is installed with `KEEP_ZSHRC=yes`. Without that, the installer
 overwrites the `.zshrc` this repo links.
 
+**Warp is the terminal.** Two Warp settings live in Warp's own account sync and
+cannot be set from here, so the installer lists them. Turn on Appearance ›
+Prompt › honour the custom prompt (PS1) so starship shows, and set the font to
+JetBrainsMono Nerd Font. Inside Warp, `.zshrc` skips the fzf key bindings,
+zsh-autosuggestions and zsh-syntax-highlighting, because Warp provides its own.
+They still load in iTerm2 and VS Code.
+
 **The font is installed, not selected.** iTerm2 does not pick fonts up
-automatically. Set JetBrainsMono Nerd Font under Settings › Profiles › Text,
+automatically either. Set JetBrainsMono Nerd Font under Settings › Profiles › Text,
 or the prompt shows boxes where its glyphs should be.
 
 **Node is the current release, not LTS.** Homebrew's `node` formula tracks the

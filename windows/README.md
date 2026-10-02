@@ -24,7 +24,7 @@ shell is elevated, and whether Developer Mode is on. Then five layers run:
 | `packages` | `winget install --id --exact` for every id in `profiles\core.txt` and each selected profile that `winget export` does not already report, so nothing is upgraded |
 | `vs` | cpp profile only: applies `vsconfig\cpp.vsconfig` to Visual Studio 2026 Community with `setup.exe modify`, when `vswhere -requires` says a component is missing |
 | `dotfiles` | Backs up, then symlinks, `.gitconfig`, `.config\git\ignore`, `.config\starship.toml` and the pwsh `profile.ps1` and `shell-ux.ps1`. Also `.config\git\delta.gitconfig` once delta is installed. Sets Windows Terminal's default profile and font |
-| `tooling` | PowerShell modules into pwsh 7, `go install` tools, npm globals, `uv python install` |
+| `tooling` | PowerShell modules into pwsh 7, `go install` tools, npm globals, `uv python install`, `uv tool install` |
 | `extensions` | VS Code extensions from `common\profiles\` |
 
 The packages layer re-reads PATH from the registry after it installs anything,
@@ -59,9 +59,18 @@ Under Windows PowerShell, `New-Item -ItemType SymbolicLink` demands elevation
 even with Developer Mode on, and `mklink` does not.
 
 **Nothing elevates itself.** A machine-scope winget install raises its own UAC
-prompt, so a first run is smoother from an elevated shell. The Visual Studio
+prompt, so a first run is smoother from an elevated shell. Core installs gsudo,
+so later one-off elevation is `gsudo <command>`, for example
+`gsudo winget install <id>`, without opening an admin terminal. The Visual Studio
 installer also elevates itself. WSL may need a reboot before Docker Desktop
 works.
+
+**Warp is the terminal.** Two Warp settings live in Warp's own account sync and
+cannot be set from here, so the installer lists them. Turn on Appearance ›
+Prompt › honour the custom prompt (PS1) so starship shows, and set the font to
+JetBrainsMono Nerd Font. Inside Warp, `shell-ux.ps1` skips the PSReadLine
+tuning, the fzf key bindings and the lazy posh-git completer, because Warp's
+input editor replaces them. They still load in VS Code and Windows Terminal.
 
 **PowerShell 7 is the shell.** Only the pwsh profile is managed. Windows
 PowerShell 5.1 keeps whatever profile it has. `profile.ps1` dot-sources

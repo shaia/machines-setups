@@ -28,11 +28,13 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 -Profile go,web
 
 Every machine gets **core**, which contains:
 
-- git, gh and delta
+- Warp as the terminal (iTerm2 and Windows Terminal stay configured too)
+- git, gh, delta, difftastic and act
 - the starship prompt with a Nerd Font
-- ripgrep, fd, bat, jq, fzf, zoxide and lazygit
-- VS Code with a small set of language-neutral extensions
-- the platform's terminal and window tooling
+- ripgrep, fd, bat, eza, jq, yq, fzf, zoxide, lazygit, sd, glow, tldr, btop, dust, duf, hyperfine, gping, doggo and fastfetch
+- uv, and pre-commit installed through it
+- VS Code with language-neutral extensions: GitLens, Error Lens, GitHub PRs, Copilot, Todo Tree, Mermaid and Draw.io among them
+- on Windows: gsudo, PowerToys, Everything, Sysinternals, and the Terminal-Icons, PSScriptAnalyzer and WinGet modules
 
 Everything else is a **profile**, chosen at install time:
 
@@ -40,16 +42,16 @@ Everything else is a **profile**, chosen at install time:
 | --- | --- |
 | `cpp` | CMake, Ninja and LLVM. On Windows also Visual Studio 2026 with a curated C++ workload and GNU make. clangd, CMake Tools and LLDB extensions |
 | `go` | Go, plus gopls, dlv, staticcheck and golangci-lint |
-| `python` | uv, which also installs and manages Python 3.13. Ruff, Pylance and debugpy |
-| `web` | Node, pnpm, ESLint and Prettier |
+| `python` | Python 3.13 through uv (which is in core). Ruff, Pylance and debugpy |
+| `web` | Node, pnpm, xh, mkcert, ESLint and Prettier |
 | `dotnet` | .NET SDK 10 (LTS) and C# Dev Kit |
 | `rust` | rustup with the stable toolchain, and rust-analyzer |
 | `java` | Amazon Corretto 21 and the Java extension pack |
-| `containers` | Docker Desktop (with WSL on Windows), kubectl, helm, k9s, kind |
+| `containers` | Docker Desktop (with WSL on Windows), kubectl, kubectx, helm, k9s, kind, stern, lazydocker, dive |
 | `cloud` | AWS CLI, OpenTofu, Terragrunt |
-| `ai` | Ollama, the Claude desktop app, Claude Code CLI and extension |
+| `ai` | Ollama, the Claude desktop app, Claude Code, Gemini CLI and Codex CLI, plus the Claude Code extension |
 | `gpu` | Windows only: CUDA Toolkit and Nsight Compute |
-| `apps` | Chrome, Arc, Obsidian, Slack, Zoom, Postman |
+| `apps` | Chrome, Arc, Obsidian, Slack, Zoom, Postman. On Windows also ShareX and WizTree |
 
 `all` selects every profile. A run with no profile installs core and lists
 the profiles.
@@ -60,7 +62,7 @@ the profiles.
 common/                 shared by both platforms
   git/                  gitconfig, delta.gitconfig, global ignore
   starship.toml         the prompt
-  profiles/<name>.txt   VS Code extensions, go tools, npm globals, uv Pythons
+  profiles/<name>.txt   VS Code extensions, go tools, npm globals, uv Pythons and uv tools
 macos/
   install.sh
   profiles/<name>.Brewfile
@@ -80,8 +82,13 @@ needs registering. To add a tool to an existing profile, add one line.
 
 ## The opinions, and why
 
-- **One prompt everywhere.** starship, configured once in `common/`, so the
-  prompt reads the same in Terminal, iTerm2 and VS Code on either platform.
+- **Warp is the terminal, starship the prompt.** starship is configured once in
+  `common/`, so the prompt reads the same in Warp, VS Code and any other terminal.
+  Warp brings its own completions, Ctrl+R history search, autosuggestions and
+  syntax highlighting, so the shell profiles skip their own versions of those
+  inside Warp (detected through `TERM_PROGRAM`) and keep them everywhere else.
+- **uv in core.** Python-based developer tools such as pre-commit install with
+  `uv tool install` on every machine, without needing the python profile.
 - **uv for Python, nothing else.** No conda and no python.org installers. uv
   installs interpreters, makes virtual environments and runs tools, faster than
   the alternatives and without a base environment leaking into every shell.
