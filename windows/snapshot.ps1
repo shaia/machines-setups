@@ -10,11 +10,11 @@ checked-in snapshot does not rot as packages come and go.
 
 Two kinds of inventory file, treated differently:
 
-  Curated   winget-packages.txt, choco-packages.txt. Hand-sectioned with
-            comments that the package manager cannot know about. New packages
-            are appended under an "Unsorted" header for you to file; packages
-            that are listed but no longer installed are reported, never removed,
-            because the list is also where "installed by other means" lives.
+  Curated   winget-packages.txt. Hand-sectioned with comments that winget
+            cannot know about. New packages are appended under an "Unsorted"
+            header for you to file; packages that are listed but no longer
+            installed are reported, never removed, because the list is also
+            where "installed by other means" lives.
 
   Generated tools.txt, vscode-extensions.txt, cursor-extensions.txt and
             vsconfig\*.vsconfig. Rewritten wholesale from the live machine.
@@ -216,20 +216,19 @@ else {
     Write-Warn "winget not on PATH; leaving winget-packages.txt alone."
 }
 
-# --- Chocolatey --------------------------------------------------------------
+# --- Other package managers --------------------------------------------------
+#
+# The snapshot is winget-only. Chocolatey and scoop are reported rather than
+# inventoried, so a machine that still carries them sees the drift on every
+# run; README.md has the one-time migration off them.
 
 if (Test-Command choco) {
-    $r = Invoke-Capture @('choco', 'list', '--limit-output')
-    $live = @($r.Output | Where-Object { $_ -match '\|' } | ForEach-Object { ($_ -split '\|')[0] } | Sort-Object)
-    Update-CuratedList -Path (Join-Path $ScriptDir 'choco-packages.txt') -Live $live -Label 'choco-packages.txt' -Header @(
-        '# Chocolatey packages - snapshot of this machine. Applied by install.ps1 with',
-        '#   choco install <name> -y',
-        '# from an elevated shell, for every name `choco list` does not report.',
-        '# Refresh with .\snapshot.ps1 (new names land under an Unsorted header at the bottom).'
-    )
+    $names = @((Invoke-Capture @('choco', 'list', '--limit-output')).Output |
+        Where-Object { $_ -match '\|' } | ForEach-Object { ($_ -split '\|')[0] })
+    Write-Warn "choco is installed ($($names -join ', ')) but is not part of this snapshot; see 'Consolidated onto winget' in README.md."
 }
-else {
-    Write-Warn "choco not on PATH; leaving choco-packages.txt alone."
+if (Test-Command scoop) {
+    Write-Warn "scoop is installed but is not part of this snapshot; see 'Consolidated onto winget' in README.md."
 }
 
 # --- Visual Studio workloads -------------------------------------------------
@@ -395,7 +394,7 @@ else {
 }
 
 Update-GeneratedList -Path $toolsPath -Lines $toolLines -Label 'tools.txt' -Header @(
-    '# Developer tools outside winget and choco - restored by install.ps1 (tooling layer).',
+    '# Developer tools outside winget - restored by install.ps1 (tooling layer).',
     '# Regenerate with .\snapshot.ps1',
     '#',
     '#   go <module>@latest   go install <module>',

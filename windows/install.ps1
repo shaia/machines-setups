@@ -47,7 +47,7 @@ $WindowsTerminalState = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsT
 $VsMajorByYear = @{ '2019' = 16; '2022' = 17; '2026' = 18 }
 $VsProductId = @{ 'community' = 'Community'; 'professional' = 'Professional'; 'enterprise' = 'Enterprise'; 'buildtools' = 'BuildTools' }
 
-$AllLayers = @('winget', 'choco', 'vs', 'dotfiles', 'tooling', 'extensions')
+$AllLayers = @('winget', 'vs', 'dotfiles', 'tooling', 'extensions')
 $Layers = $AllLayers
 
 # --- Output helpers ----------------------------------------------------------
@@ -244,8 +244,8 @@ function Invoke-Preflight {
 
     $script:Elevated = Test-Elevated
     $script:DeveloperMode = Test-DeveloperMode
-    if ($script:Elevated) { Write-Info "Running elevated: choco and file symlinks are available." }
-    else { Write-Info "Not elevated: the choco layer will be skipped." }
+    if ($script:Elevated) { Write-Info "Running elevated: file symlinks work, and winget installs will not prompt." }
+    else { Write-Info "Not elevated: each machine-scope winget install raises its own UAC prompt." }
     if ($script:DeveloperMode) { Write-Info "Developer Mode is on: file symlinks work without elevation." }
     elseif (-not $script:Elevated) { Write-Warn "Developer Mode is off and the shell is not elevated; the dotfiles layer cannot create file symlinks." }
 
@@ -299,6 +299,15 @@ function Get-WingetInstalled {
 function Invoke-LayerWinget {
     Write-Step "winget packages"
 
+    # The snapshot is winget-only. Chocolatey and scoop once held duplicates of
+    # winget packages on the machine this was taken from; README.md has the
+    # one-time migration off them, and this nags until it has been run.
+    foreach ($other in @('choco', 'scoop')) {
+        if (Test-Command $other) {
+            Write-Warn "$other is installed but is not part of this snapshot; see 'Consolidated onto winget' in README.md."
+        }
+    }
+
     $list = Join-Path $ScriptDir 'winget-packages.txt'
     $entries = @(Get-Entries $list)
     if ($entries.Count -eq 0) {
@@ -332,48 +341,6 @@ function Invoke-LayerWinget {
         Write-Warn "`winget search <name>` finds the current id."
     }
     Write-Info "Visual Studio entries install the default workloads only; the vs layer adds the rest."
-}
-
-# --- Layer: choco ------------------------------------------------------------
-
-function Invoke-LayerChoco {
-    Write-Step "Chocolatey packages"
-
-    if (-not $script:Elevated) {
-        Write-Warn "Chocolatey installs into C:\ProgramData and needs an elevated shell; skipping."
-        Write-Warn "Re-run from an elevated PowerShell with: .\install.ps1 -Only choco"
-        return
-    }
-
-    if (-not (Test-Command choco)) {
-        Write-Warn "Chocolatey missing; installing."
-        RunBlock "Install Chocolatey via https://community.chocolatey.org/install.ps1" {
-            Set-ExecutionPolicy Bypass -Scope Process -Force
-            [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
-            Invoke-Expression ((New-Object Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-        }
-        $chocoBin = Join-Path $env:ProgramData 'chocolatey\bin'
-        if (Test-Path -LiteralPath $chocoBin) { $env:Path = "$chocoBin;$env:Path" }
-        if (-not (Test-Command choco) -and -not $DryRun) {
-            Write-Err "choco still not on PATH. Open a new elevated shell and re-run with -Only choco."
-            return
-        }
-    }
-
-    $entries = @(Get-Entries (Join-Path $ScriptDir 'choco-packages.txt'))
-    $present = @()
-    if (Test-Command choco) {
-        $present = @((Invoke-Capture @('choco', 'list', '--limit-output')).Output |
-            Where-Object { $_ -match '\|' } | ForEach-Object { (($_ -split '\|')[0]).ToLowerInvariant() })
-    }
-
-    $already = 0; $added = 0; $failed = 0
-    foreach ($name in $entries) {
-        if ($present -contains $name.ToLowerInvariant()) { $already++; continue }
-        $code = Run @('choco', 'install', $name, '-y', '--no-progress')
-        if ($code -eq 0) { $added++ } else { Write-Warn "  failed ($code): $name"; $failed++ }
-    }
-    Write-Info "choco: $($entries.Count) listed, $already already present, $added installed, $failed failed."
 }
 
 # --- Layer: vs ---------------------------------------------------------------
@@ -425,8 +392,8 @@ function Invoke-LayerVs {
         }
 
         $components = @((Get-Content -LiteralPath $cfg.FullName -Raw | ConvertFrom-Json).components)
-        $args = @($vswhere, '-products', $productId, '-version', $range, '-requires') + $components + @('-property', 'installationPath')
-        $satisfied = (Invoke-Capture $args).Output | Select-Object -First 1
+        $query = @($vswhere, '-products', $productId, '-version', $range, '-requires') + $components + @('-property', 'installationPath')
+        $satisfied = (Invoke-Capture $query).Output | Select-Object -First 1
         if ($satisfied) {
             Write-Info "$($cfg.BaseName): all $($components.Count) components present."
             continue
@@ -461,7 +428,7 @@ function Backup-Path {
     }
 }
 
-function Link-File {
+function New-FileLink {
     param([string]$Source, [string]$Target)
 
     $item = Get-Item -LiteralPath $Target -Force -ErrorAction SilentlyContinue
@@ -482,7 +449,7 @@ function Link-File {
     else { Write-Err "mklink failed ($code) for $Target" }
 }
 
-function Link-Directory {
+function New-DirectoryLink {
     param([string]$Source, [string]$Target)
 
     $item = Get-Item -LiteralPath $Target -Force -ErrorAction SilentlyContinue
@@ -512,15 +479,15 @@ function Invoke-LayerDotfiles {
     }
 
     # Directory links never need a privilege.
-    Link-Directory (Join-Path $d 'git-global-hooks') (Join-Path $HOME '.git-global-hooks')
+    New-DirectoryLink (Join-Path $d 'git-global-hooks') (Join-Path $HOME '.git-global-hooks')
 
     if (Test-SymlinkAbility) {
-        Link-File (Join-Path $d 'gitconfig')           (Join-Path $HOME '.gitconfig')
-        Link-File (Join-Path $d 'config\git\ignore')   (Join-Path $HOME '.config\git\ignore')
-        Link-File (Join-Path $d 'config\starship.toml') (Join-Path $HOME '.config\starship.toml')
-        Link-File (Join-Path $d 'bashrc')              (Join-Path $HOME '.bashrc')
-        Link-File (Join-Path $d 'profile')             (Join-Path $HOME '.profile')
-        Link-File (Join-Path $d 'condarc')             (Join-Path $HOME '.condarc')
+        New-FileLink (Join-Path $d 'gitconfig')           (Join-Path $HOME '.gitconfig')
+        New-FileLink (Join-Path $d 'config\git\ignore')   (Join-Path $HOME '.config\git\ignore')
+        New-FileLink (Join-Path $d 'config\starship.toml') (Join-Path $HOME '.config\starship.toml')
+        New-FileLink (Join-Path $d 'bashrc')              (Join-Path $HOME '.bashrc')
+        New-FileLink (Join-Path $d 'profile')             (Join-Path $HOME '.profile')
+        New-FileLink (Join-Path $d 'condarc')             (Join-Path $HOME '.condarc')
 
         # PowerShell 7 reads Documents\PowerShell, Windows PowerShell 5.1 reads
         # Documents\WindowsPowerShell; profile.ps1 is all-hosts, the other file
@@ -528,17 +495,17 @@ function Invoke-LayerDotfiles {
         # the directory of the link, so it must be linked alongside.
         $pwshDir = Join-Path $Documents 'PowerShell'
         foreach ($name in @('profile.ps1', 'Microsoft.PowerShell_profile.ps1', 'shell-ux.ps1')) {
-            Link-File (Join-Path (Join-Path $d 'powershell') $name) (Join-Path $pwshDir $name)
+            New-FileLink (Join-Path (Join-Path $d 'powershell') $name) (Join-Path $pwshDir $name)
         }
         $wpsDir = Join-Path $Documents 'WindowsPowerShell'
         foreach ($name in @('profile.ps1', 'Microsoft.PowerShell_profile.ps1')) {
-            Link-File (Join-Path (Join-Path $d 'windowspowershell') $name) (Join-Path $wpsDir $name)
+            New-FileLink (Join-Path (Join-Path $d 'windowspowershell') $name) (Join-Path $wpsDir $name)
         }
 
         # Windows Terminal creates LocalState on first launch; before that there
         # is nowhere to put the link.
         if (Test-Path -LiteralPath $WindowsTerminalState) {
-            Link-File (Join-Path $d 'windows-terminal\settings.json') (Join-Path $WindowsTerminalState 'settings.json')
+            New-FileLink (Join-Path $d 'windows-terminal\settings.json') (Join-Path $WindowsTerminalState 'settings.json')
         }
         else {
             Write-Warn "Windows Terminal has never been launched (no LocalState folder); skipping its settings.json."
@@ -699,7 +666,7 @@ function Invoke-LayerTooling {
     # ~\.claude\CLAUDE.md.
     $claudeDir = Join-Path $HOME '.claude'
     if (Test-Path -LiteralPath $ClaudeConfigRepo) {
-        Link-Directory $ClaudeConfigRepo $claudeDir
+        New-DirectoryLink $ClaudeConfigRepo $claudeDir
     }
     else {
         Write-Warn "Claude config repo not found at $ClaudeConfigRepo."
@@ -774,7 +741,6 @@ function Invoke-Main {
     Invoke-Preflight
 
     if (Wants 'winget')     { Invoke-LayerWinget }
-    if (Wants 'choco')      { Invoke-LayerChoco }
     if (Wants 'vs')         { Invoke-LayerVs }
     if (Wants 'dotfiles')   { Invoke-LayerDotfiles }
     if (Wants 'tooling')    { Invoke-LayerTooling }

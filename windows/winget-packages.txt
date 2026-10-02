@@ -11,7 +11,9 @@
 #
 # Everything winget cannot match to a source (drivers, Store-only apps, the
 # JetBrains IDEs, MATLAB, Wolfram, ParaView) is absent by construction; see
-# README.md for that list.
+# README.md for that list. winget is the only package manager in this snapshot:
+# the three ids marked "was choco" / "was scoop" replace what Chocolatey and
+# scoop used to provide, and README.md has the one-time migration off both.
 
 # ---------------------------------------------------------------------------
 # Shell and terminal
@@ -26,6 +28,7 @@ Microsoft.Coreutils             # GNU coreutils; its installer manages a block i
 DEVCOM.JetBrainsMonoNerdFont    # the font Windows Terminal is set to; installs machine-wide (HKLM)
 Warp.Warp                       # alternative terminal, installed but not the default
 SamHocevar.WinCompose           # compose key
+7zip.7zip                       # was scoop; the pwsh profile and .bashrc put C:\Program Files\7-Zip on PATH
 
 # ---------------------------------------------------------------------------
 # Git and GitHub
@@ -58,9 +61,11 @@ Microsoft.DotNet.Native.Runtime
 # ---------------------------------------------------------------------------
 # Build tools and compilers
 # ---------------------------------------------------------------------------
-Kitware.CMake                   # choco-packages.txt installs cmake as well; both land in C:\Program Files\CMake
+Kitware.CMake                   # C:\Program Files\CMake; the choco copy that shared the directory is retired
 LLVM.LLVM                       # standalone clang/clangd; dotfiles\bashrc puts it on Git Bash's PATH
 BrechtSanders.WinLibs.POSIX.UCRT # mingw-w64 gcc
+ezwinports.make                 # was choco; GNU make 4.4.1, the only `make` outside a VS developer shell
+Bazel.Bazelisk                  # was choco
 Graphviz.Graphviz               # dot, on the Windows PowerShell 5.1 profile's PATH
 Hugo.Hugo.Extended
 

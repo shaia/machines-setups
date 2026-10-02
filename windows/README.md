@@ -18,12 +18,11 @@ finds the repo extracted from a zip instead.
 ## What it does
 
 Preflight always runs (winget present, git present, whether the shell is
-elevated and whether Developer Mode is on), then six layers:
+elevated and whether Developer Mode is on), then five layers:
 
 | Layer | Covers |
 | --- | --- |
-| `winget` | `winget-packages.txt` — 119 packages, via `winget install --id --exact` for every id that `winget export` does not already report, so nothing is ever upgraded |
-| `choco` | `choco-packages.txt` — 7 packages. Needs an elevated shell; skipped with a notice otherwise |
+| `winget` | `winget-packages.txt` — 122 packages, via `winget install --id --exact` for every id that `winget export` does not already report, so nothing is ever upgraded. The only package manager in the snapshot |
 | `vs` | `vsconfig\*.vsconfig` — the workloads of Visual Studio 2022 Community, 2026 Community and Build Tools 2022, applied with `setup.exe modify --config` only when `vswhere -requires` says a component is missing |
 | `dotfiles` | Backs up then symlinks `.gitconfig`, `.config\git\ignore`, `.config\starship.toml`, `.bashrc`, `.profile`, `.condarc`, both PowerShell profile sets and Windows Terminal's `settings.json`; junctions `~\.git-global-hooks` |
 | `tooling` | `tools.txt` — 9 `go install` tools, 4 npm globals, 1 dotnet tool, 4 PowerShell modules; the `~\.claude` junction |
@@ -57,12 +56,13 @@ would do too.
 
 **Nothing elevates itself.** Junctions need no privilege at all. File symlinks
 need either an elevated shell or Developer Mode (Settings › System › For
-developers). Chocolatey needs elevation, so its layer skips itself when it has
-none. `wsl --install` needs elevation and a reboot, so it is a manual step. The
-Visual Studio installer is the exception: `setup.exe modify` raises its own UAC
-prompt. The links are made with cmd's `mklink` rather than `New-Item`, because
-under Windows PowerShell `New-Item -ItemType SymbolicLink` demands elevation
-even with Developer Mode on; `mklink` honours it.
+developers). A machine-scope winget install raises a UAC prompt from an
+unelevated shell, one per package, so a first run is more comfortable
+elevated. `wsl --install` needs elevation and a reboot, so it is a manual step.
+The Visual Studio installer is the exception: `setup.exe modify` raises its own
+UAC prompt. The links are made with cmd's `mklink` rather than `New-Item`,
+because under Windows PowerShell `New-Item -ItemType SymbolicLink` demands
+elevation even with Developer Mode on; `mklink` honours it.
 
 **The machine this was written on has Developer Mode off**, and the session that
 wrote it was not elevated — so the `dotfiles` layer has only ever been dry-run
@@ -94,16 +94,17 @@ change, and nothing else:
 | `powershell\profile.ps1`, `windowspowershell\profile.ps1` | Conda hook `C:\Users\shaia\miniconda3` → `$HOME\miniconda3` | Correct on exactly one machine |
 | both `profile.ps1` | Added a guarded dot-source of `~\.powershell.local.ps1` | The escape hatch the rows above depend on |
 | `windowspowershell\Microsoft.PowerShell_profile.ps1` | `C:\Users\shaia\.local\bin;C:\Users\shaia\AppData\Local\...` → `$HOME\.local\bin;$env:LOCALAPPDATA\...` | Same |
+| `powershell\Microsoft.PowerShell_profile.ps1`, `bashrc` | Added `C:\Program Files\7-Zip` to PATH, guarded by a directory check | The scoop shim that used to put `7z` on PATH is retired; 7-Zip's own installer adds nothing to PATH |
 | `bashrc` | Dropped `export GEMINI_API_KEY=...`; added `[ -r ~/.bashrc.local ] && . ~/.bashrc.local` | Secret, and its escape hatch |
 | `profile` | `/c/Users/shaia/AppData/Local/...` → `$HOME/AppData/Local/...` | Git Bash sets `$HOME` from `%USERPROFILE%` |
 | `config\git\ignore` | One line instead of 23 | Twenty-two were the same line with a backslash, from a `>>` repeated once per session; git matched only the forward-slash one |
 | `windows-terminal\settings.json` | `C:\\Users\\shaia` → `%USERPROFILE%` in the four conda profiles (16 places) | Correct on exactly one machine |
 | `gitconfig` | Rewritten; see below | — |
 
-`powershell\Microsoft.PowerShell_profile.ps1`, `shell-ux.ps1`, `starship.toml`,
-`condarc` and the ten hook files are byte-identical bar line endings: LF in the
-repo, and `.gitattributes` pins the files that `sh` reads to LF on checkout,
-because Git for Windows would otherwise give them CRLF and `sh` chokes on `\r`.
+`shell-ux.ps1`, `starship.toml`, `condarc` and the ten hook files are
+byte-identical bar line endings: LF in the repo, and `.gitattributes` pins the
+files that `sh` reads to LF on checkout, because Git for Windows would
+otherwise give them CRLF and `sh` chokes on `\r`.
 
 **`.gitconfig` holds preferences, never identity.** The live file is 27 lines;
 what is tracked keeps two settings and adds two includes. Four kinds of thing
@@ -190,13 +191,45 @@ the Garmin and GPS-mapping tools, and the HP print app from the Store. Drop the
 section on a box without the hardware; the snapshot keeps them because they are
 what is installed.
 
-**Two package managers hold duplicates.** Chocolatey has 5 real packages, every
-one of which winget also carries, and three are installed twice: `cmake` (with
-`Kitware.CMake`, same `C:\Program Files\CMake` target), `llvm` (with
-`LLVM.LLVM`) and `golangci-lint` (with the `go install` in `tools.txt`). Scoop
-is installed too, with one package (`7zip`) and buckets last updated in 2024;
-it has no layer. Consolidating is a separate decision; the snapshot records
-what is.
+**Consolidated onto winget.** The machine this was taken from also had
+Chocolatey, with five packages that winget carries too, three of them
+installed twice — `cmake` and `llvm` into the very directories the winget
+packages own (`C:\Program Files\CMake`, `C:\Program Files\LLVM`, where the
+winget versions are the ones on disk), `golangci-lint` beside the `go install`
+in `tools.txt` — and scoop, with one package (`7zip`) and buckets last updated
+in 2024. The snapshot keeps one package manager: `7zip.7zip`, `Bazel.Bazelisk`
+and `ezwinports.make` (the same 4.4.1) replace the only things choco and scoop
+provided on their own, and the `cmake`/`llvm` duplicates are simply dropped.
+Both scripts warn while `choco` or `scoop` is still on PATH, and
+`snapshot.ps1 -Diff` lists the three ids as not installed until this has been
+run once, from an elevated shell:
+
+```powershell
+cd $HOME\development\machines-setups\windows
+.\install.ps1 -Only winget            # 7zip.7zip, Bazel.Bazelisk, ezwinports.make
+
+# Drop choco's records for cmake and llvm WITHOUT running their uninstall
+# scripts: the LLVM uninstaller and the CMake MSI they would invoke are the
+# winget packages' own, and would take C:\Program Files\LLVM and \CMake with them.
+choco uninstall cmake cmake.install llvm -y --skip-powershell --skip-autouninstaller
+choco uninstall golangci-lint make bazelisk -y     # shims only; the go and winget copies remain
+
+# Chocolatey has no uninstaller of its own.
+Remove-Item -Recurse -Force $env:ChocolateyInstall
+[Environment]::SetEnvironmentVariable('ChocolateyInstall', $null, 'Machine')
+[Environment]::SetEnvironmentVariable('ChocolateyLastPathUpdate', $null, 'User')
+$p = [Environment]::GetEnvironmentVariable('Path', 'Machine') -split ';' | Where-Object { $_ -and $_ -ne 'C:\ProgramData\chocolatey\bin' }
+[Environment]::SetEnvironmentVariable('Path', ($p -join ';'), 'Machine')
+
+scoop uninstall scoop                 # removes 7zip and ~\scoop with it; user scope, asks once
+```
+
+Order matters: winget takes over before anything is removed, so `7z`, `make`
+and `bazelisk` never go missing. Afterwards `golangci-lint` resolves to
+`~\go\bin` (the choco shim was first on PATH), `make` and `bazelisk` to winget's
+package directories on the User PATH, and `7z` to `C:\Program Files\7-Zip`
+through the PATH line both profiles now carry. Open a new shell to see any of
+it.
 
 **Visual Studio workloads are a layer of their own** because winget installs
 Visual Studio with its defaults, and this machine's selections (Linux CMake,
@@ -231,13 +264,15 @@ repo's own `.gitignore` is what keeps sessions and credentials out of git.
 **The full rebuild path has not been executed.** There is no clean machine to
 try it on. What is verified, under both Windows PowerShell 5.1 and PowerShell
 7.6: both scripts parse; a full `-DryRun` transcript; `snapshot.ps1 -Diff`
-reports no drift against the live machine; and a real
-`install.ps1 -Skip dotfiles,choco` run that found every package, workload, tool
-and extension present and installed nothing. What is not: the `dotfiles` layer
-for real (no symlink privilege in the session that wrote it — only the
-`mklink` probe and the junction path have run), the `choco` layer (not
-elevated), `setup.exe modify` (every component was already present), and
-Windows Terminal writing through its linked `settings.json`.
+against the live machine (clean, apart from the three ids and the two warnings
+the consolidation above explains); a real `install.ps1 -Skip dotfiles` run
+from before those three ids were added, which found every package, workload,
+tool and extension present and installed nothing; and a real
+`install.ps1 -Skip dotfiles,winget` run since. What is not: the `dotfiles`
+layer for real (no symlink privilege in the session that wrote it — only the
+`mklink` probe and the junction path have run), the migration block above
+(same reason: not elevated), `setup.exe modify` (every component was already
+present), and Windows Terminal writing through its linked `settings.json`.
 
 ## Keeping it current
 

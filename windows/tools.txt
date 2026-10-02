@@ -1,4 +1,4 @@
-# Developer tools outside winget and choco - restored by install.ps1 (tooling layer).
+# Developer tools outside winget - restored by install.ps1 (tooling layer).
 # Regenerate with .\snapshot.ps1
 #
 #   go <module>@latest   go install <module>

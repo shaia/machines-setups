@@ -19,6 +19,8 @@ if (-not $env:VSCMD_VER) {
 }
 
 $env:Path += ";C:\Program Files\Git\cmd"
+# 7-Zip's installer does not add itself to PATH; the scoop shim it replaced did.
+if (Test-Path 'C:\Program Files\7-Zip') { $env:Path += ';C:\Program Files\7-Zip' }
 
 # DO NOT MODIFY -- coreutils -- 60b36fc6-2d59-49df-be51-28dd2f4c3c9a
 # vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
