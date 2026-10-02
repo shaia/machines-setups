@@ -69,6 +69,11 @@ function Format-Arg {
 # Native commands write progress to stderr, and under 'Stop' Windows PowerShell
 # turns a redirected stderr line into a terminating error; so native commands
 # run with 'Continue' in effect and report through their exit code instead.
+#
+# Their stdout goes to the host, not the pipeline: a function's output is
+# everything it emits, so a bare `& winget ...` would make the returned exit
+# code an array of winget's lines plus the code, and `$code -eq 0` on that is
+# false even after a successful install.
 function Run {
     param([Parameter(Mandatory)][string[]]$Command, [switch]$Quiet)
     $printed = ($Command | ForEach-Object { Format-Arg $_ }) -join ' '
@@ -83,7 +88,7 @@ function Run {
     $ErrorActionPreference = 'Continue'
     try {
         if ($Quiet) { & $exe @rest 2>&1 | Out-Null }
-        else { & $exe @rest }
+        else { & $exe @rest | Out-Host }
         $code = $LASTEXITCODE
     }
     finally {
