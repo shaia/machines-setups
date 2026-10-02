@@ -64,9 +64,13 @@ UAC prompt. The links are made with cmd's `mklink` rather than `New-Item`,
 because under Windows PowerShell `New-Item -ItemType SymbolicLink` demands
 elevation even with Developer Mode on; `mklink` honours it.
 
-**The machine this was written on has Developer Mode off**, and the session that
-wrote it was not elevated — so the `dotfiles` layer has only ever been dry-run
-here. See the verification note at the end.
+**Developer Mode is on here** since 2026-10-02, set from an elevated shell by
+writing `AllowDevelopmentWithoutDevLicense=1` under
+`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock` — the one value
+the Settings toggle writes that the symlink check reads, without the optional
+Developer Mode package the toggle also installs. It took effect for new
+processes at once, no sign-out needed, and the `dotfiles` layer then ran for
+real, unelevated, through `mklink`. See the verification note at the end.
 
 **Documents lives in OneDrive here.** `$PROFILE` is
 `...\OneDrive\Documents\PowerShell\...`, which is where the links go — the
@@ -77,8 +81,10 @@ copy up and replaces it with a link. Harmless, but do not be surprised to see
 the profile files "synced" somewhere they are not links.
 
 **Secrets are not here.** `~\.ssh`, gh's `hosts.yml` and friends are excluded
-by the repo-root `.gitignore`. The live `profile.ps1` and `.bashrc` on this
-machine each carried a plaintext `GEMINI_API_KEY`; the tracked copies do not.
+by the repo-root `.gitignore`. The pre-link `profile.ps1` and `.bashrc` on this
+machine each carried a plaintext `GEMINI_API_KEY`; the tracked copies do not,
+and the originals sit in `~\.dotfiles-backup-20261002-074754` (and, for the
+profile, in OneDrive's version history) until deleted by hand.
 The key lives in the User environment, which every process inherits, and
 `~\.powershell.local.ps1` / `~\.bashrc.local` are the escape hatch for a shell
 that somehow does not. The `dotfiles` layer checks the User environment and
@@ -130,13 +136,21 @@ hooks`. Note what is *not* there: no `init.defaultBranch`, because the live
 machine never set one; the installer's system config says `master`, and this
 snapshot records what is, not what might be nicer.
 
-**Before running the `dotfiles` layer on this machine**, write
-`~\.gitconfig-local` with the `[user]` block, both `[credential]` blocks and the
-two `hasconfig` rules (pointing at `~\.gitconfig-work`), and rename the
-existing employer-named identity file to `~\.gitconfig-work`. Otherwise the
-first commit after linking fails with `unable to auto-detect email address`.
-The layer warns when the file is absent and prints a starting point; the backup
-it makes in `~\.dotfiles-backup-<timestamp>` has every line you need.
+**Before running the `dotfiles` layer on a machine whose `~\.gitconfig` carries
+identity** (this one did, until 2026-10-02), write `~\.gitconfig-local` with
+the `[user]` block, both `[credential]` blocks and any `hasconfig` rules
+(pointing at `~\.gitconfig-work`), and *copy* the employer-named identity file
+to `~\.gitconfig-work` — not rename: the live config keeps pointing at the old
+name until the link replaces it, and a rename would put work repos on the
+personal identity for that gap. Delete the old file once `git var
+GIT_COMMITTER_IDENT` answers correctly inside a work repo. Otherwise the first
+commit after linking fails with `unable to auto-detect email address`. The
+layer warns when the file is absent and prints a starting point; the backup it
+makes in `~\.dotfiles-backup-<timestamp>` has every line you need. When
+checking, note that `git config --global user.email` then answers nothing:
+`--global` names one file, and git does not follow includes for a named file
+unless told to. `git config --global --includes user.email`, `git config
+user.email` from inside a repo, and every real git operation do.
 
 **There are three traps here.** `git config --global` writes to `~\.gitconfig`,
 which is a symlink into this repo — so `gh auth setup-git` and `git lfs install`
@@ -172,8 +186,13 @@ the same on every machine, and because `%USERPROFILE%` is expanded in
 docs, but Terminal's media resolver runs every icon and background path
 through `ExpandEnvironmentStringsW` before checking it exists). Terminal
 rewrites the whole file whenever a setting changes in its UI; it is expected to
-write through the link rather than replace it, but that has not been verified
-here, for the reason above.
+write through the link rather than replace it. The link has been in place here
+since 2026-10-02, but no setting has been changed through the UI since, so that
+is still unverified: change one, then check that
+`(Get-Item $env:LOCALAPPDATA\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json).LinkType`
+still says `SymbolicLink` and that `git status` here shows the edit. If it
+comes back a plain file, `install.ps1 -Only dotfiles` relinks it and the UI
+change is in the backup.
 
 **Cursor is deliberately not installed.** It is on this machine, twice (a
 machine-scope and a user-scope copy), and it is left out of the replay by
@@ -211,11 +230,13 @@ and `ezwinports.make` (the same 4.4.1) replace the only things choco and scoop
 provided on their own, and the `cmake`/`llvm` duplicates are simply dropped.
 Both scripts warn while `choco` or `scoop` is still on PATH, and
 `snapshot.ps1 -Diff` lists the three ids as not installed until this has been
-run once, from an elevated shell:
+run once, from an elevated shell. It was run here on 2026-10-02; the block
+stays as the record of what that took:
 
 ```powershell
 cd $HOME\development\machines-setups\windows
 .\install.ps1 -Only winget            # 7zip.7zip, Bazel.Bazelisk, ezwinports.make
+winget list --id ezwinports.make -e   # and the other two: exit 0 before removing anything
 
 # Drop choco's records for cmake and llvm WITHOUT running their uninstall
 # scripts: the LLVM uninstaller and the CMake MSI they would invoke are the
@@ -223,22 +244,38 @@ cd $HOME\development\machines-setups\windows
 choco uninstall cmake cmake.install llvm -y --skip-powershell --skip-autouninstaller
 choco uninstall golangci-lint make bazelisk -y     # shims only; the go and winget copies remain
 
-# Chocolatey has no uninstaller of its own.
-Remove-Item -Recurse -Force $env:ChocolateyInstall
+# Chocolatey has no uninstaller of its own. The two caches are outside its tree.
+Remove-Item -Recurse -Force $env:ChocolateyInstall, C:\ProgramData\ChocolateyHttpCache, $env:TEMP\chocolatey
 [Environment]::SetEnvironmentVariable('ChocolateyInstall', $null, 'Machine')
 [Environment]::SetEnvironmentVariable('ChocolateyLastPathUpdate', $null, 'User')
 $p = [Environment]::GetEnvironmentVariable('Path', 'Machine') -split ';' | Where-Object { $_ -and $_ -ne 'C:\ProgramData\chocolatey\bin' }
 [Environment]::SetEnvironmentVariable('Path', ($p -join ';'), 'Machine')
 
-scoop uninstall scoop                 # removes 7zip and ~\scoop with it; user scope, asks once
+# Unelevated from here. `scoop uninstall scoop` (asks once) removed the 7zip
+# shims and then died on the ReadOnly attribute of its own persist junctions
+# (apps\7zip\<ver>\Codecs and Formats), so the rest was done by hand: clear
+# that attribute, delete the links, delete the tree, drop ~\scoop\shims from
+# the User PATH, and remove the three leftovers scoop never touches.
+Get-ChildItem $HOME\scoop -Recurse -Force -Directory | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint } |
+    ForEach-Object { $_.Attributes = $_.Attributes -band (-bnot [IO.FileAttributes]::ReadOnly); [IO.Directory]::Delete($_.FullName) }
+Remove-Item -Recurse -Force $HOME\scoop, $HOME\.config\scoop, "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Scoop Apps"
+# The User PATH is REG_EXPAND_SZ (it holds %USERPROFILE%\.dotnet\tools);
+# [Environment]::SetEnvironmentVariable would write it back expanded, so edit
+# the value through the registry API and keep its kind.
+$k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+$raw = $k.GetValue('Path', '', 'DoNotExpandEnvironmentNames') -split ';' | Where-Object { $_ -and $_ -notlike '*\scoop\shims' }
+$k.SetValue('Path', ($raw -join ';'), $k.GetValueKind('Path')); $k.Close()
 ```
 
 Order matters: winget takes over before anything is removed, so `7z`, `make`
-and `bazelisk` never go missing. Afterwards `golangci-lint` resolves to
-`~\go\bin` (the choco shim was first on PATH), `make` and `bazelisk` to winget's
-package directories on the User PATH, and `7z` to `C:\Program Files\7-Zip`
-through the PATH line both profiles now carry. Open a new shell to see any of
-it.
+and `bazelisk` never go missing. Afterwards, observed in a fresh shell:
+`golangci-lint` resolves to `~\go\bin` (the choco shim was first on PATH);
+`make` and `bazelisk` to symlinks in `%LOCALAPPDATA%\Microsoft\WinGet\Links`
+(winget ran elevated, so it could create them; the older portables, installed
+with Developer Mode off, have their package directory on the User PATH instead,
+and both forms work); and `7z` to `C:\Program Files\7-Zip` through the PATH
+line both profiles now carry. `bazel` is gone: choco's package shimmed both
+names, winget's exposes `bazelisk` only. Open a new shell to see any of it.
 
 **Visual Studio workloads are a layer of their own** because winget installs
 Visual Studio with its defaults, and this machine's selections (Linux CMake,
@@ -273,15 +310,19 @@ repo's own `.gitignore` is what keeps sessions and credentials out of git.
 **The full rebuild path has not been executed.** There is no clean machine to
 try it on. What is verified, under both Windows PowerShell 5.1 and PowerShell
 7.6: both scripts parse; a full `-DryRun` transcript; `snapshot.ps1 -Diff`
-against the live machine (clean, apart from the three ids and the two warnings
-the consolidation above explains); a real `install.ps1 -Skip dotfiles` run
-from before those three ids were added, which found every package, workload,
-tool and extension present and installed nothing; and a real
-`install.ps1 -Skip dotfiles,winget` run since. What is not: the `dotfiles`
-layer for real (no symlink privilege in the session that wrote it — only the
-`mklink` probe and the junction path have run), the migration block above
-(same reason: not elevated), `setup.exe modify` (every component was already
-present), and Windows Terminal writing through its linked `settings.json`.
+against the live machine (clean, as of 2026-10-02, after the consolidation
+above); a real `install.ps1 -Skip dotfiles` run which found every package,
+workload, tool and extension present and installed nothing; a real
+`install.ps1 -Only winget` run from an elevated shell that installed exactly
+the three consolidation ids (and exposed a bug, since fixed, where `Run`
+returned the installer's output along with its exit code and so counted
+successful installs as failed); the migration block above; and the `dotfiles`
+layer for real, unelevated with Developer Mode on — every link made through
+`mklink`, originals backed up, all three shells load their profiles through the
+links, identity correct in a personal and in a work repo, `git status` here
+clean afterwards. What is not: `setup.exe modify` (every component was already
+present), Windows Terminal writing through its linked `settings.json`, and a
+run on a machine with nothing on it.
 
 ## Keeping it current
 
