@@ -6,3 +6,4 @@
 
 Ollama.Ollama
 Anthropic.Claude                # desktop app; the Claude Code CLI is an npm global in common/profiles/ai.txt
+OpenJS.NodeJS.LTS               # npm, for the Claude Code CLI
