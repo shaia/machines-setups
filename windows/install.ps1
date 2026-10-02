@@ -477,6 +477,31 @@ function Test-WingetInstalled {
     return ($r.ExitCode -eq 0)
 }
 
+# EarTrumpet ships only as an x86 MSIX, so it needs the x86 build of the UWP
+# C++ runtime (Microsoft.VCLibs.140.00). winget treats the x64 build as
+# satisfying that dependency, then the install fails with 0x80073cf3. Desktops
+# usually have both builds; Windows Server images (CI runners) have only x64.
+# Ask the Appx store for the x86 build itself, through Windows PowerShell,
+# whose Appx module works everywhere.
+function Test-X86UwpRuntime {
+    $r = Invoke-Capture @('powershell', '-NoProfile', '-NonInteractive', '-Command',
+        "@(Get-AppxPackage -Name 'Microsoft.VCLibs.140.00' | Where-Object { `$_.Architecture -eq 'X86' }).Count")
+    $n = 0
+    [void][int]::TryParse(([string]($r.Output | Select-Object -Last 1)).Trim(), [ref]$n)
+    return ($n -gt 0)
+}
+
+function Install-X86UwpRuntime {
+    $label = 'UWP C++ runtime, x86 (for EarTrumpet)'
+    if (Test-X86UwpRuntime) { Add-Result ok $label; return }
+    # --force: winget already counts the x64 build as this package installed.
+    $code = RunRetry @('winget', 'install', '--id', 'Microsoft.VCLibs.14', '--exact', '--source', 'winget',
+        '--architecture', 'x86', '--force', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity')
+    if ($DryRun) { Add-Result changed $label 'dry run'; return }
+    if (Test-X86UwpRuntime) { Add-Result changed $label }
+    else { Add-Result failed $label "winget exited $code; EarTrumpet will fail to install without it" }
+}
+
 function Invoke-LayerPackages {
     Write-Step "winget packages"
 
@@ -489,6 +514,10 @@ function Invoke-LayerPackages {
     Write-Info "$($ids.Count) packages across: $($SelectedProfiles -join ', ')."
     Write-Info "Asking winget what is installed (winget export; read-only)."
     $present = @(Get-WingetInstalled)
+
+    if ($ids -contains 'File-New-Project.EarTrumpet' -and $present -notcontains 'file-new-project.eartrumpet') {
+        Install-X86UwpRuntime
+    }
 
     $already = 0; $added = 0; $failed = 0
     foreach ($id in $ids) {
