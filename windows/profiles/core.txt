@@ -62,6 +62,10 @@ vscode ms-vscode-remote.remote-wsl  # open folders inside WSL from VS Code
 # Editor and desktop
 Microsoft.VisualStudioCode
 Microsoft.PowerToys
+# EarTrumpet is an MSIX app that needs the UWP C++ runtime. Windows 11 desktops
+# have it; Windows Server images (CI runners) do not, and winget does not
+# install that kind of dependency itself.
+Microsoft.VCLibs.14
 File-New-Project.EarTrumpet     # per-app volume from the tray
 voidtools.Everything            # instant filename search
 Microsoft.Sysinternals.Suite    # Process Explorer, Process Monitor, Autoruns

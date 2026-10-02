@@ -501,7 +501,12 @@ function Invoke-LayerPackages {
         if ($DryRun) { Add-Result changed $name 'dry run'; $added++; continue }
         # Verify rather than trust the exit code: some installers report a
         # pending reboot as failure, and some failures exit 0.
-        if (Test-WingetInstalled $id) { Add-Result changed $name; $added++ }
+        # winget list can miss a package that winget export does see (seen with
+        # a portable package on a clean runner), and export is what the
+        # presence check above uses, so it decides when the two disagree.
+        if ((Test-WingetInstalled $id) -or (@(Get-WingetInstalled) -contains $id.ToLowerInvariant())) {
+            Add-Result changed $name; $added++
+        }
         else {
             Add-Result failed $name "winget exited $code and does not list it; 'winget search' finds a renamed id"
             $failed++
