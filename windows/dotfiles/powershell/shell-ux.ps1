@@ -15,6 +15,11 @@
 $__cmdline = [Environment]::GetCommandLineArgs()
 if ($__cmdline -contains '-NonInteractive' -or $__cmdline -contains '-noni') { return }
 if ($Host.Name -notin 'ConsoleHost', 'Visual Studio Code Host') { return }
+# Redirected input or output means a script or CI runner started this shell,
+# not a person: `pwsh -Command`, `shell: pwsh` in GitHub Actions. Interactive
+# hooks (PSReadLine handlers, prompt and idle-event registrations) have no use
+# there, and in CI they kept the step from exiting after its script finished.
+if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected) { return }
 
 # --- Warp ---------------------------------------------------------------------
 # Warp brings its own input editor, completions, Ctrl+R history search,

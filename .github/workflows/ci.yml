@@ -45,7 +45,10 @@ jobs:
           if ($out -notmatch ', 0 changed, 0 failed,') { throw 'second run was not idempotent; see its summary above' }
 
       - name: Toolchains work from a fresh shell
-        shell: pwsh
+        # -NoProfile: GitHub's default pwsh shell loads profiles, and the
+        # dotfiles layer has just linked ours. The checks need PATH, not it.
+        shell: pwsh -NoProfile -Command ". '{0}'"
+        timeout-minutes: 15
         run: |
           $env:Path = @([Environment]::GetEnvironmentVariable('Path', 'Machine'),
                         [Environment]::GetEnvironmentVariable('Path', 'User')) -join ';'
@@ -96,6 +99,7 @@ jobs:
 
       - name: Toolchains work from a fresh login shell
         shell: zsh -l {0}
+        timeout-minutes: 15
         run: |
           set -e
           git --version
