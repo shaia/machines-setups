@@ -83,8 +83,9 @@ the profile files "synced" somewhere they are not links.
 **Secrets are not here.** `~\.ssh`, gh's `hosts.yml` and friends are excluded
 by the repo-root `.gitignore`. The pre-link `profile.ps1` and `.bashrc` on this
 machine each carried a plaintext `GEMINI_API_KEY`; the tracked copies do not,
-and the originals sit in `~\.dotfiles-backup-20261002-074754` (and, for the
-profile, in OneDrive's version history) until deleted by hand.
+the backup the `dotfiles` layer made of the originals has been deleted, and
+the one copy left is the old profile in OneDrive's version history, which only
+the web UI can clear.
 The key lives in the User environment, which every process inherits, and
 `~\.powershell.local.ps1` / `~\.bashrc.local` are the escape hatch for a shell
 that somehow does not. The `dotfiles` layer checks the User environment and
