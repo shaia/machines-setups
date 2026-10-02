@@ -309,13 +309,17 @@ function Invoke-LayerWinget {
     }
 
     $list = Join-Path $ScriptDir 'winget-packages.txt'
-    $entries = @(Get-Entries $list)
+    $all = @(Get-Entries $list)
+    # A leading '-' marks a package that is installed on the source machine but
+    # deliberately not replayed; snapshot.ps1 knows the same convention.
+    $excluded = @($all | Where-Object { $_.StartsWith('-') })
+    $entries = @($all | Where-Object { -not $_.StartsWith('-') })
     if ($entries.Count -eq 0) {
         Write-Err "No entries in $list"
         exit 1
     }
     $fromStore = @($entries | Where-Object { $_ -match '\s' }).Count
-    Write-Info "Applying winget-packages.txt: $($entries.Count) packages ($($entries.Count - $fromStore) winget, $fromStore msstore)."
+    Write-Info "Applying winget-packages.txt: $($entries.Count) packages ($($entries.Count - $fromStore) winget, $fromStore msstore); $($excluded.Count) listed as deliberately not installed."
 
     Write-Info "Asking winget what is installed (winget export; read-only, takes a while)."
     $present = @(Get-WingetInstalled)
@@ -724,8 +728,7 @@ function Install-Extensions {
 
 function Invoke-LayerExtensions {
     Write-Step "Editor extensions"
-    Install-Extensions -Cmd 'code'   -List (Join-Path $ScriptDir 'vscode-extensions.txt') -Label 'VS Code'
-    Install-Extensions -Cmd 'cursor' -List (Join-Path $ScriptDir 'cursor-extensions.txt') -Label 'Cursor'
+    Install-Extensions -Cmd 'code' -List (Join-Path $ScriptDir 'vscode-extensions.txt') -Label 'VS Code'
 }
 
 # --- Main --------------------------------------------------------------------

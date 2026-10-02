@@ -22,11 +22,11 @@ elevated and whether Developer Mode is on), then five layers:
 
 | Layer | Covers |
 | --- | --- |
-| `winget` | `winget-packages.txt` — 122 packages, via `winget install --id --exact` for every id that `winget export` does not already report, so nothing is ever upgraded. The only package manager in the snapshot |
+| `winget` | `winget-packages.txt` — 121 packages, via `winget install --id --exact` for every id that `winget export` does not already report, so nothing is ever upgraded. The only package manager in the snapshot |
 | `vs` | `vsconfig\*.vsconfig` — the workloads of Visual Studio 2022 Community, 2026 Community and Build Tools 2022, applied with `setup.exe modify --config` only when `vswhere -requires` says a component is missing |
 | `dotfiles` | Backs up then symlinks `.gitconfig`, `.config\git\ignore`, `.config\starship.toml`, `.bashrc`, `.profile`, `.condarc`, both PowerShell profile sets and Windows Terminal's `settings.json`; junctions `~\.git-global-hooks` |
 | `tooling` | `tools.txt` — 9 `go install` tools, 4 npm globals, 1 dotnet tool, 4 PowerShell modules; the `~\.claude` junction |
-| `extensions` | 96 VS Code and 94 Cursor extensions |
+| `extensions` | 96 VS Code extensions |
 
 Select layers with `-Only winget,dotfiles` or `-Skip extensions`. Every layer is
 idempotent — it checks state, skips what is satisfied, and reports what it skipped.
@@ -175,6 +175,15 @@ rewrites the whole file whenever a setting changes in its UI; it is expected to
 write through the link rather than replace it, but that has not been verified
 here, for the reason above.
 
+**Cursor is deliberately not installed.** It is on this machine, twice (a
+machine-scope and a user-scope copy), and it is left out of the replay by
+choice, extensions included. `winget-packages.txt` lists it with a leading
+`-`, the file's opt-out convention: `install.ps1` skips the line, and
+`snapshot.ps1` neither appends the id as new nor reports it as missing, so
+the choice does not show up as drift on every run. That is the convention to
+use for anything else that should stay on this machine without being
+replayed; a plain deletion would just come back under `Unsorted`.
+
 **`winget` cannot see everything.** `winget export` only lists packages it can
 match to a source, so these are installed here and absent from
 `winget-packages.txt` by construction: the JetBrains IDEs (CLion, GoLand,
@@ -281,14 +290,15 @@ present), and Windows Terminal writing through its linked `settings.json`.
 .\snapshot.ps1 -Diff    # report drift, write nothing
 ```
 
-Two kinds of inventory file. `tools.txt`, the two extension lists and
+Two kinds of inventory file. `tools.txt`, `vscode-extensions.txt` and
 `vsconfig\*.vsconfig` are **generated**: rewritten wholesale from the live
-machine. `winget-packages.txt` and `choco-packages.txt` are **curated**: they
-keep their section headers and comments, and `snapshot.ps1` only ever appends
-to them, under a dated `Unsorted` header for you to file. Packages that are
-listed but no longer installed are reported, never deleted — the usual causes
-are an uninstall, which you will recognise, and an app that updated itself in a
-way winget no longer matches, which you will want to keep.
+machine. `winget-packages.txt` is **curated**: it keeps its section headers
+and comments, and `snapshot.ps1` only ever appends to it, under a dated
+`Unsorted` header for you to file. Packages that are listed but no longer
+installed are reported, never deleted — the usual causes are an uninstall,
+which you will recognise, and an app that updated itself in a way winget no
+longer matches, which you will want to keep. A line with a leading `-` is the
+opt-out: installed here, never replayed, never reported.
 
 `dotfiles\` needs no refresh: `install.ps1` links them into place, so editing
 `~\.gitconfig` or the PowerShell profile edits this repo.

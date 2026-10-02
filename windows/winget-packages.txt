@@ -14,6 +14,10 @@
 # README.md for that list. winget is the only package manager in this snapshot:
 # the three ids marked "was choco" / "was scoop" replace what Chocolatey and
 # scoop used to provide, and README.md has the one-time migration off both.
+#
+# A leading '-' marks a package that is installed on the machine this snapshot
+# was taken from but is deliberately not replayed. install.ps1 skips it, and
+# snapshot.ps1 neither appends it as new nor reports it as missing.
 
 # ---------------------------------------------------------------------------
 # Shell and terminal
@@ -100,7 +104,7 @@ VisIt.VisIt                     # VISITLOC and VISIT_MPIEXEC in the User environ
 # Editors and IDEs
 # ---------------------------------------------------------------------------
 Microsoft.VisualStudioCode      # the user-scope installer; vscode-extensions.txt
-Anysphere.Cursor                # cursor-extensions.txt
+-Anysphere.Cursor               # installed here (twice: machine- and user-scope), deliberately not replayed
 ZedIndustries.Zed
 Google.Antigravity
 Google.AntigravityIDE

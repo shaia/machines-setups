@@ -16,8 +16,8 @@ Two kinds of inventory file, treated differently:
             installed are reported, never removed, because the list is also
             where "installed by other means" lives.
 
-  Generated tools.txt, vscode-extensions.txt, cursor-extensions.txt and
-            vsconfig\*.vsconfig. Rewritten wholesale from the live machine.
+  Generated tools.txt, vscode-extensions.txt and vsconfig\*.vsconfig.
+            Rewritten wholesale from the live machine.
 
 dotfiles\ is not touched: install.ps1 links those into place, so edits to
 ~\.gitconfig or the PowerShell profile land in this repo already.
@@ -122,8 +122,13 @@ function Update-CuratedList {
     # Every function result is wrapped in @(): PowerShell unrolls a returned
     # array, so an empty one arrives as $null and a single entry as a string.
     $lines = @(Read-Lines $Path)
-    $tracked = @(Get-Entries $lines)
-    $delta = Compare-Entries -Tracked $tracked -Live $Live
+    $all = @(Get-Entries $lines)
+    # A leading '-' marks a package that is installed here but deliberately not
+    # replayed (install.ps1 skips it): no drift when present, none when gone.
+    $excluded = @($all | Where-Object { $_.StartsWith('-') } | ForEach-Object { $_.Substring(1).Trim().ToLowerInvariant() })
+    $tracked = @($all | Where-Object { -not $_.StartsWith('-') })
+    $live = @($Live | Where-Object { $excluded -notcontains $_.ToLowerInvariant() })
+    $delta = Compare-Entries -Tracked $tracked -Live $live
     $name = Split-Path -Leaf $Path
 
     if ($delta.Added.Count -eq 0 -and $delta.Removed.Count -eq 0) {
@@ -423,7 +428,5 @@ function Update-Extensions {
 
 Update-Extensions -Cmd 'code' -Path (Join-Path $ScriptDir 'vscode-extensions.txt') -Label 'VS Code' `
     -HeaderLine 'VS Code extensions - restored by install.ps1 via: code --install-extension'
-Update-Extensions -Cmd 'cursor' -Path (Join-Path $ScriptDir 'cursor-extensions.txt') -Label 'Cursor' `
-    -HeaderLine 'Cursor extensions - restored by install.ps1 via: cursor --install-extension'
 
 Write-Info "Done. dotfiles\ needs no refresh - install.ps1 links them into place."

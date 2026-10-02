@@ -12,7 +12,7 @@ script inside the directory that matches the machine.
 | Directory | Target |
 | --- | --- |
 | [`macos/`](macos/) | Apple Silicon Macs — Homebrew, zsh/oh-my-zsh, dotfiles, Go tooling, VS Code + Cursor extensions |
-| [`windows/`](windows/) | Windows 11 — winget, Visual Studio workloads, PowerShell profiles + starship, dotfiles, Go/npm/dotnet tooling, VS Code + Cursor extensions |
+| [`windows/`](windows/) | Windows 11 — winget, Visual Studio workloads, PowerShell profiles + starship, dotfiles, Go/npm/dotnet tooling, VS Code extensions |
 
 ```sh
 git clone <this repo> ~/development/machines-setups
