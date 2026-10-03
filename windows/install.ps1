@@ -524,8 +524,79 @@ function Install-X86UwpRuntime {
     else { Add-Result failed $label "winget exited $code; EarTrumpet will fail to install without it" }
 }
 
+# winget's default downloader, Delivery Optimization, can freeze partway
+# through a large download and never recover (microsoft/winget-cli #4648 and
+# #2124). On a fresh machine that shows up as the run hanging on Warp, the first
+# large package in core; newer winget falls back after a minute without
+# progress, but the winget a new machine ships with may predate that. WinINet
+# is the downloader winget's maintainers point to. It is a per-user winget
+# setting, so it is set before the first download.
+function Get-WingetSettingsPath {
+    # `winget --info` names the file (%LOCALAPPDATA% unexpanded). It differs
+    # between the Store-packaged winget and an unpackaged one.
+    foreach ($line in @((Invoke-Capture @('winget', '--info')).Output)) {
+        if ($line -match '^\s*User Settings\s+(\S.*)$') {
+            return [Environment]::ExpandEnvironmentVariables($Matches[1].Trim())
+        }
+    }
+    return Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe\LocalState\settings.json'
+}
+
+# The settings file as an object, $null when it is missing or empty. winget
+# allows // comments, which ConvertFrom-Json in Windows PowerShell rejects, so
+# whole-line comments are dropped first. Throws when the rest is not JSON.
+function Read-WingetSettings {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    $text = [string](Get-Content -LiteralPath $Path -Raw)
+    $text = $text -replace '(?m)^\s*//.*$', ''
+    if (-not $text.Trim()) { return $null }
+    return ($text | ConvertFrom-Json)
+}
+
+function Get-WingetDownloader {
+    param($Settings)
+    if ($null -eq $Settings) { return $null }
+    $network = $Settings.PSObject.Properties['network']
+    if ($null -eq $network -or $null -eq $network.Value) { return $null }
+    $downloader = $network.Value.PSObject.Properties['downloader']
+    if ($null -eq $downloader) { return $null }
+    return [string]$downloader.Value
+}
+
+function Set-WingetDownloader {
+    $label = 'winget downloader is WinINet'
+    $path = Get-WingetSettingsPath
+    try { $settings = Read-WingetSettings $path }
+    catch {
+        Add-Result flagged $label "cannot parse $path; set `"network`": { `"downloader`": `"wininet`" } in it by hand"
+        return
+    }
+    if ((Get-WingetDownloader $settings) -eq 'wininet') { Add-Result ok $label; return }
+
+    if (Test-Path -LiteralPath $path) { Backup-Path $path -Copy }
+    RunBlock "Set network.downloader = wininet in $path" {
+        $s = $settings
+        if ($null -eq $s) { $s = New-Object psobject -Property @{ '$schema' = 'https://aka.ms/winget-settings.schema.json' } }
+        if ($null -eq $s.PSObject.Properties['network'] -or $null -eq $s.network) {
+            $s | Add-Member -NotePropertyName network -NotePropertyValue (New-Object psobject) -Force
+        }
+        $s.network | Add-Member -NotePropertyName downloader -NotePropertyValue 'wininet' -Force
+        $dir = Split-Path -Parent $path
+        if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        [IO.File]::WriteAllText($path, ($s | ConvertTo-Json -Depth 16), (New-Object System.Text.UTF8Encoding($false)))
+    }
+    if ($DryRun) { Add-Result changed $label 'dry run'; return }
+    $after = $null
+    try { $after = Get-WingetDownloader (Read-WingetSettings $path) } catch { }
+    if ($after -eq 'wininet') { Add-Result changed $label "in $path" }
+    else { Add-Result failed $label "wrote $path but it reads back as '$after'" }
+}
+
 function Invoke-LayerPackages {
     Write-Step "winget packages"
+
+    Set-WingetDownloader
 
     # The Visual C++ runtime many tools link against (uv among them), for the
     # machine's own architecture. Not in a profile file because the id differs

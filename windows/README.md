@@ -21,7 +21,7 @@ shell is elevated, and whether Developer Mode is on. Then six layers run:
 
 | Layer | Does |
 | --- | --- |
-| `packages` | `winget install --id --exact` for every id in `profiles\core.txt` and each selected profile that `winget export` does not already report, so nothing is upgraded |
+| `packages` | Sets winget's downloader to WinINet, then `winget install --id --exact` for every id in `profiles\core.txt` and each selected profile that `winget export` does not already report, so nothing is upgraded |
 | `system` | Per-user, applied directly: Explorer shows file extensions, hidden files and the full path in the title bar; taskbar End Task; no web results in Start search. Machine-wide, applied when elevated and otherwise queued in the summary: long paths, Developer Mode, Windows' inline `sudo`. Then WSL 2 with Ubuntu |
 | `vs` | Applies `vsconfig\<profile>.vsconfig` for each selected profile that has one (`cpp`, `lowlevel`) to Visual Studio 2026 Community with `setup.exe modify`, when `vswhere -requires` says a component is missing |
 | `dotfiles` | Backs up, then symlinks, `.gitconfig`, `.config\git\ignore`, `.config\starship.toml` and the pwsh `profile.ps1` and `shell-ux.ps1`. Also `.config\git\delta.gitconfig` once delta is installed. Sets Windows Terminal's default profile and font |
@@ -78,6 +78,19 @@ running hypervisor makes the processor report firmware virtualization as off,
 so the hypervisor check comes first. Once WSL works, the layer installs Ubuntu
 without launching it, falling back to `--web-download` on machines without
 Store access. Launch Ubuntu once from the Start menu to create your Linux user.
+
+**winget downloads through WinINet.** winget's default downloader, Delivery
+Optimization, can freeze partway through a large download and never recover
+([winget-cli#4648](https://github.com/microsoft/winget-cli/issues/4648),
+[#2124](https://github.com/microsoft/winget-cli/issues/2124)). On a fresh machine
+that shows as the run hanging on Warp, the first large package in core. Newer
+winget falls back after a minute without progress, but the winget a new machine
+ships with may predate that. So the packages layer sets `network.downloader` to
+`wininet` in winget's user settings file (the path `winget --info` reports)
+before the first download: it creates the file when missing, merges into it
+when present, backs the original up, and drops its `//` comments, which
+Windows PowerShell cannot parse. If a run hangs anyway, Ctrl+C and re-run:
+what is already installed is skipped.
 
 **`winget export` answers "what is installed".** It is the one view that is
 not a truncated fixed-width table, and it gets one retry. The
