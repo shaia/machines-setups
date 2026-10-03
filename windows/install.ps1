@@ -504,6 +504,46 @@ function Test-WingetInstalled {
     return ($r.ExitCode -eq 0)
 }
 
+# Packages whose installer writes no uninstall entry, so neither winget list
+# nor winget export ever sees them: presence is the file they install. NASM's
+# per-user installer also leaves its directory off PATH, so this adds it.
+$script:UnlistedPackages = @{
+    'NASM.NASM' = Join-Path $env:LOCALAPPDATA 'bin\NASM\nasm.exe'
+}
+
+function Test-UnlistedPackage {
+    param([string]$Id)
+    $exe = $script:UnlistedPackages[$Id]
+    if (-not $exe -or -not (Test-Path -LiteralPath $exe)) { return $false }
+    $dir = Split-Path -Parent $exe
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    if (@($userPath -split ';' | Where-Object { $_.TrimEnd('\') -eq $dir }).Count -eq 0) {
+        RunBlock "Add $dir to the user PATH" {
+            $joined = (@($userPath -split ';' | Where-Object { $_ }) + $dir) -join ';'
+            [Environment]::SetEnvironmentVariable('Path', $joined, 'User')
+        }
+    }
+    return $true
+}
+
+# winget's own name for an install exit code (`winget error`, in winget 1.8+),
+# plus what to do about the causes seen in practice.
+function Get-WingetFailureReason {
+    param([int]$Code)
+    if ($Code -eq 0) { return "winget exited 0; the installer may need a reboot, or it registers nothing winget can see" }
+    $hex = '0x{0:X8}' -f $Code
+    $text = ((Invoke-Capture @('winget', 'error', $hex)).Output | Select-Object -First 1)
+    $reason = "winget exited $hex"
+    if ($text -match 'APPINSTALLER_CLI_ERROR_(\w+)') { $reason += " ($($Matches[1]))" }
+    switch ($hex) {
+        '0x8A150011' { $reason += '; the publisher replaced the download behind the manifest, so wait for winget-pkgs to update it or install from the vendor site' }
+        '0x8A150014' { $reason += "; the id is gone, so 'winget search' may find it renamed" }
+        '0x8A150101' { $reason += '; close the app and re-run' }
+        '0x8A150109' { $reason += '; reboot and re-run' }
+    }
+    return $reason
+}
+
 # EarTrumpet ships only as an x86 MSIX, so it needs the x86 build of the UWP
 # C++ runtime (Microsoft.VCLibs.140.00). winget treats the x64 build as
 # satisfying that dependency, then the install fails with 0x80073cf3. Desktops
@@ -618,7 +658,7 @@ function Invoke-LayerPackages {
     $already = 0; $added = 0; $failed = 0
     foreach ($id in $ids) {
         $name = "winget $id"
-        if ($present -contains $id.ToLowerInvariant()) { Add-Result ok $name; $already++; continue }
+        if ($present -contains $id.ToLowerInvariant() -or (Test-UnlistedPackage $id)) { Add-Result ok $name; $already++; continue }
         # Installing a package winget already knows would upgrade it; the
         # presence check above is what keeps this a no-upgrade install.
         $code = RunRetry @('winget', 'install', '--id', $id, '--exact', '--source', 'winget',
@@ -632,8 +672,11 @@ function Invoke-LayerPackages {
         if ((Test-WingetInstalled $id) -or (@(Get-WingetInstalled) -contains $id.ToLowerInvariant())) {
             Add-Result changed $name; $added++
         }
+        elseif (Test-UnlistedPackage $id) {
+            Add-Result changed $name; $added++
+        }
         else {
-            Add-Result failed $name "winget exited $code and does not list it; 'winget search' finds a renamed id"
+            Add-Result failed $name "does not list it after install: $(Get-WingetFailureReason $code)"
             $failed++
         }
     }
@@ -756,6 +799,19 @@ function Invoke-WslSetup {
         Add-Result ok "WSL 2 distro ($($distros -join ', '))"
         return
     }
+    # `wsl --status` exits 0 even when it reports that the Virtual Machine
+    # Platform is off, and right after enabling it (from winget installing
+    # WSL or Docker) it stays unusable until a reboot, while `wsl --install -d`
+    # still exits 0 without registering anything.
+    $vmp = Get-CimInstance Win32_OptionalFeature -Filter "Name='VirtualMachinePlatform'" -ErrorAction SilentlyContinue
+    if ($null -ne $vmp -and $vmp.InstallState -ne 1) {
+        Add-ElevatedCommand 'WSL 2 platform' 'wsl --install --no-distribution   # then reboot and re-run -Only system'
+        return
+    }
+    if (Test-Path -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending') {
+        Add-Result flagged "WSL 2 distro $WslDistro" 'Windows has a reboot pending, and WSL cannot start until it reboots; reboot and re-run -Only system'
+        return
+    }
     Write-Info "WSL 2 is enabled but has no distro; installing $WslDistro."
     $code = RunRetry @('wsl.exe', '--install', '-d', $WslDistro, '--no-launch')
     if ($code -ne 0 -and -not $DryRun) {
@@ -817,11 +873,18 @@ function Invoke-LayerVs {
             Add-Result ok "Visual Studio $name ($($components.Count) components)"
             continue
         }
-        Write-Info "${name}: adding missing components (the installer elevates itself and may prompt)."
+        # --passive does not elevate itself: from a non-elevated shell the
+        # installer exits 5007 ("should be run elevated from the beginning").
+        if (-not $script:Elevated) {
+            Add-ElevatedCommand "Visual Studio $name" ("& '$setup' modify --installPath '$installPath' --config '$cfg' --passive --norestart")
+            continue
+        }
+        Write-Info "${name}: adding missing components."
         $code = Run @($setup, 'modify', '--installPath', $installPath, '--config', $cfg, '--passive', '--norestart')
         if ($DryRun) { Add-Result changed "Visual Studio $name" 'dry run'; continue }
         if ((Invoke-Capture $query).Output | Select-Object -First 1) { Add-Result changed "Visual Studio $name" }
-        else { Add-Result failed "Visual Studio $name" "setup.exe modify exited $code and components are still missing; close Visual Studio and re-run -Only vs" }
+        elseif ($code -in 1641, 3010) { Add-Result flagged "Visual Studio $name" "setup.exe modify exited $code; reboot and re-run -Only vs" }
+        else { Add-Result failed "Visual Studio $name" "setup.exe modify exited $code and components are still missing; close Visual Studio and re-run -Only vs (logs: %TEMP%\dd_installer_*.log)" }
     }
 }
 
