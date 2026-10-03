@@ -168,9 +168,11 @@ macOS stay in `common/profiles/`.
 
 **Profiles can require profiles.** A `requires <profile>` line in a profile file
 pulls that profile in, so `-Profile lowlevel` alone also selects `cpp`. The WDK
-package in `lowlevel` is pinned to the same Windows SDK version (26100) as
+package in `lowlevel` is pinned to the same Windows SDK version (28000) as
 `cpp.vsconfig`, because a WDK only builds against its matching SDK. Raise both
-together.
+together. The WDK must also ship build tasks for the installed Visual Studio:
+WDK 26100 has them only for Visual Studio 2022, so under Visual Studio 2026
+every driver build fails with MSB4062.
 
 **Rust needs the C++ tools.** rustup's MSVC toolchain links with Visual
 Studio's linker. Select `cpp` together with `rust`, or rustup-init will offer to
@@ -183,6 +185,10 @@ install the Build Tools itself.
   the repo**. Move them into `~\.gitconfig-local`.
 - To check identity, use `git config --global --includes user.email`. Without
   `--includes`, git reads the named file only and does not follow the include.
+- Build drivers from the command line with the 64-bit
+  `MSBuild\Current\Bin\amd64\MSBuild.exe`, as Visual Studio does. The 32-bit
+  `Current\Bin\MSBuild.exe` makes the WDK pick its x86 API extractor, which
+  fails, so ApiValidator stops the build.
 
 ## Testing
 

@@ -15,9 +15,11 @@ requires cpp                    # MSVC and the Windows SDK; the WDK builds on th
 Microsoft.WinDbg                # user-mode, crash-dump and kernel debugging
 x64dbg.x64dbg                   # lighter user-mode debugger
 
-# Drivers. The WDK must match the SDK version in vsconfig/cpp.vsconfig (26100);
-# vsconfig/lowlevel.vsconfig adds its Visual Studio extension.
-Microsoft.WindowsWDK.10.0.26100
+# Drivers. The WDK must match the SDK version in vsconfig/cpp.vsconfig (28000);
+# vsconfig/lowlevel.vsconfig adds its Visual Studio extension. 28000 is the
+# first WDK whose MSBuild tasks load in Visual Studio 2026; 26100 only has
+# tasks for 2022 and fails every driver build with MSB4062.
+Microsoft.WindowsWDK.10.0.28000
 
 # Binary inspection
 hasherezade.PE-bear             # PE headers, sections, imports
