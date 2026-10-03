@@ -6,7 +6,8 @@
 #
 # Not on winget, so install.ps1 lists them as manual steps instead:
 #   Ghidra (NSA GitHub releases; runs on the java profile's JDK), Intel VTune,
-#   AMD uProf, OSR Driver Loader, and Hyper-V as a kernel-debugging target.
+#   AMD uProf and OSR Driver Loader. Hyper-V, the kernel-debugging target, is
+#   enabled by the system layer when this profile is selected.
 
 requires cpp                    # MSVC and the Windows SDK; the WDK builds on them
 

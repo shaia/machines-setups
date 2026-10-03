@@ -49,7 +49,7 @@ Everything else is a **profile**, chosen at install time:
 | `cloud` | AWS CLI, OpenTofu, Terragrunt |
 | `ai` | Ollama, the Claude desktop app, Claude Code, Gemini CLI and Codex CLI, plus the Claude Code extension |
 | `gpu` | Windows only: CUDA Toolkit and Nsight Compute |
-| `lowlevel` | Windows only, pulls in `cpp`: WinDbg, x64dbg, the WDK with its Visual Studio extension and Spectre libraries, PE-bear, Dependencies, ImHex, HxD, Cutter, Binary Ninja Free, PerfView, Tracy, the Windows Performance Toolkit, System Informer, Cppcheck, sccache, NASM, and VS Code's Hex Editor. Ghidra, VTune, uProf, OSR Driver Loader and Hyper-V are listed as manual steps |
+| `lowlevel` | Windows only, pulls in `cpp`: WinDbg, x64dbg, the WDK with its Visual Studio extension and Spectre libraries, PE-bear, Dependencies, ImHex, HxD, Cutter, Binary Ninja Free, PerfView, Tracy, the Windows Performance Toolkit, System Informer, Cppcheck, sccache, NASM, and VS Code's Hex Editor. The system layer enables Hyper-V; Ghidra, VTune, uProf and OSR Driver Loader are listed as manual steps |
 | `apps` | Chrome, Arc, Obsidian, Slack, Zoom. On Windows also ShareX and WizTree |
 
 `all` selects every profile. A run with no profile installs core and lists

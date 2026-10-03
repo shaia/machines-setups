@@ -23,7 +23,7 @@ shell is elevated and whether Developer Mode is on. Then six layers run:
 | Layer | Does |
 | --- | --- |
 | `packages` | `winget install --id --exact` for every id in `profiles\core.txt` and each selected profile that `winget export` does not already report, so nothing is upgraded |
-| `system` | Per-user, applied directly: Explorer shows file extensions, hidden files and the full path in the title bar; taskbar End Task; no web results in Start search. Machine-wide, applied when elevated and otherwise queued in the summary: long paths, Developer Mode, Windows' inline `sudo`. Then WSL 2 with Ubuntu |
+| `system` | Per-user, applied directly: Explorer shows file extensions, hidden files and the full path in the title bar; taskbar End Task; no web results in Start search. Machine-wide, applied when elevated and otherwise queued in the summary: long paths, Developer Mode, Windows' inline `sudo`. Then WSL 2 with Ubuntu, and Hyper-V when `lowlevel` is selected |
 | `vs` | Applies `vsconfig\<profile>.vsconfig` for each selected profile that has one (`cpp`, `lowlevel`) to Visual Studio 2026 Community with `setup.exe modify`, when `vswhere -requires` says a component is missing |
 | `dotfiles` | Backs up, then symlinks, `.gitconfig`, `.config\git\ignore`, `.config\starship.toml` and the pwsh `profile.ps1` and `shell-ux.ps1`. Also `.config\git\delta.gitconfig` once delta is installed. Sets Windows Terminal's default profile and font |
 | `tooling` | PowerShell modules into pwsh 7, `go install` tools, npm globals, `uv python install`, `uv tool install` |
@@ -79,6 +79,16 @@ running hypervisor makes the processor report firmware virtualization as off,
 so the hypervisor check comes first. Once WSL works, the layer installs Ubuntu
 without launching it, falling back to `--web-download` on machines without
 Store access. Launch Ubuntu once from the Start menu to create your Linux user.
+
+**Hyper-V comes with `lowlevel`.** A VM is the safe target for kernel debugging
+with WinDbg and for test-loading drivers, so selecting `lowlevel` makes the
+system layer enable `Microsoft-Hyper-V-All` with
+`dism /online /enable-feature /all /norestart`. Like WSL, it is best-effort.
+Home editions have no Hyper-V, and a machine without hardware virtualization
+(the same check WSL uses) cannot run it; both are flagged. From a non-elevated
+shell the `dism` command is queued in the summary. Hyper-V needs a reboot to
+finish. Until then an elevated re-run flags it as pending; only DISM reports
+that state, and DISM needs elevation.
 
 **winget downloads through WinINet.** winget's default downloader, Delivery
 Optimization, can freeze partway through a large download and never recover

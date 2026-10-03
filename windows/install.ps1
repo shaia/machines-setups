@@ -767,7 +767,22 @@ function Invoke-LayerSystem {
     }
 
     Invoke-WslSetup
+    if ($SelectedProfiles -contains 'lowlevel') { Invoke-HyperVSetup }
 }
+
+# Whether WSL 2 and Hyper-V have hardware virtualization to run on. With a
+# hypervisor already running, the processor reports firmware virtualization
+# as off, so a present hypervisor settles it first.
+function Test-HardwareVirtualization {
+    $cs = Get-CimInstance Win32_ComputerSystem -ErrorAction SilentlyContinue
+    $cpu = Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1
+    $hypervisor = ($null -ne $cs -and $cs.HypervisorPresent)
+    $firmware = ($null -ne $cpu -and $cpu.VirtualizationFirmwareEnabled)
+    return ($hypervisor -or $firmware)
+}
+
+$NoVirtualizationDetail = ('hardware virtualization is off: enable VT-x/AMD-V in the BIOS/UEFI, ' +
+    'or on a VM expose nested virtualization (Hyper-V: Set-VMProcessor -ExposeVirtualizationExtensions $true)')
 
 # WSL 2 with a Linux distro. Best-effort: a machine without hardware
 # virtualization (or a VM without nested virtualization) cannot run it, and
@@ -775,15 +790,8 @@ function Invoke-LayerSystem {
 function Invoke-WslSetup {
     $status = Invoke-Capture @('wsl.exe', '--status')
     if ($status.ExitCode -ne 0) {
-        $cs = Get-CimInstance Win32_ComputerSystem -ErrorAction SilentlyContinue
-        $cpu = Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1
-        # With a hypervisor already running, the processor reports firmware
-        # virtualization as off, so a present hypervisor settles it first.
-        $hypervisor = ($null -ne $cs -and $cs.HypervisorPresent)
-        $firmware = ($null -ne $cpu -and $cpu.VirtualizationFirmwareEnabled)
-        if (-not $hypervisor -and -not $firmware) {
-            Add-Result flagged 'WSL 2' ('hardware virtualization is off: enable VT-x/AMD-V in the BIOS/UEFI, ' +
-                'or on a VM expose nested virtualization (Hyper-V: Set-VMProcessor -ExposeVirtualizationExtensions $true)')
+        if (-not (Test-HardwareVirtualization)) {
+            Add-Result flagged 'WSL 2' $NoVirtualizationDetail
             return
         }
         Add-ElevatedCommand 'WSL 2 platform' ('wsl --install --no-distribution   # then reboot and re-run -Only system. ' +
@@ -831,6 +839,53 @@ function Get-WslDistros {
         ForEach-Object { (Get-ItemProperty $_.PSPath).PSObject.Properties['DistributionName'] } |
         Where-Object { $null -ne $_ } | ForEach-Object { $_.Value } |
         Where-Object { $_ -and $_ -notlike 'docker-desktop*' })
+}
+
+# Hyper-V, for the lowlevel profile: a VM is the safe target for kernel
+# debugging with WinDbg and for test-loading drivers. Best-effort like WSL:
+# Home editions have no Hyper-V, and it needs hardware virtualization.
+$HyperVFeature = 'Microsoft-Hyper-V-All'
+
+# 'Enabled', 'Disabled', 'EnablePending', or $null when this edition has no
+# Hyper-V. Only DISM reports the pending state, and it needs elevation;
+# Win32_OptionalFeature does not, so it answers for a non-elevated shell.
+function Get-HyperVState {
+    if ($script:Elevated) {
+        try {
+            $f = Get-WindowsOptionalFeature -Online -FeatureName $HyperVFeature -ErrorAction Stop
+            if ($null -ne $f) { return [string]$f.State }
+        }
+        catch { }
+    }
+    $f = Get-CimInstance Win32_OptionalFeature -Filter "Name='$HyperVFeature'" -ErrorAction SilentlyContinue
+    if ($null -eq $f) { return $null }
+    if ($f.InstallState -eq 1) { return 'Enabled' }
+    return 'Disabled'
+}
+
+function Invoke-HyperVSetup {
+    $label = 'Hyper-V'
+    $state = Get-HyperVState
+    if ($null -eq $state) {
+        Add-Result flagged $label 'this Windows edition has no Hyper-V; it needs Pro, Enterprise or Education'
+        return
+    }
+    if ($state -eq 'Enabled') { Add-Result ok $label; return }
+    if ($state -eq 'EnablePending') { Add-Result flagged $label 'enabled, but Windows has to reboot to finish'; return }
+    if (-not (Test-HardwareVirtualization)) { Add-Result flagged $label $NoVirtualizationDetail; return }
+
+    $command = @('dism.exe', '/online', '/enable-feature', "/featurename:$HyperVFeature", '/all', '/norestart')
+    if (-not $script:Elevated) {
+        Add-ElevatedCommand $label (($command -join ' ') + '   # then reboot')
+        return
+    }
+    $code = Run $command
+    if ($DryRun) { Add-Result changed $label 'dry run'; return }
+    $after = Get-HyperVState
+    if ($after -eq 'Enabled') { Add-Result changed $label }
+    # 3010: enabled, and the reboot it needs is pending.
+    elseif ($after -eq 'EnablePending' -or $code -eq 3010) { Add-Result changed $label 'reboot to finish enabling it' }
+    else { Add-Result failed $label "dism exited $code and Hyper-V is still '$after'" }
 }
 
 # --- Layer: vs ---------------------------------------------------------------
@@ -1163,9 +1218,6 @@ function Invoke-LayerTooling {
         Write-Host "  Intel VTune            # Intel oneAPI site; CPU profiling on Intel hardware"
         Write-Host "  AMD uProf              # AMD developer site; CPU profiling on AMD hardware"
         Write-Host "  OSR Driver Loader      # osronline.com; test-load unsigned drivers in a VM"
-        Write-Host "  Hyper-V                # elevated, Pro/Enterprise only, then reboot:"
-        Write-Host "                         #   Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V-All"
-        Write-Host "                         # a VM is the safe target for kernel debugging with WinDbg"
     }
 }
 
