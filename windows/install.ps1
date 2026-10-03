@@ -418,8 +418,9 @@ function Wants { param([string]$Layer) return ($Layers -contains $Layer) }
 
 # --- Preflight ---------------------------------------------------------------
 #
-# Always runs. Its one mutating action (installing git) is guarded by "if
-# missing", so on an already-configured machine this is read-only.
+# Always runs. Its two mutating actions, switching winget's downloader to
+# WinINet and installing git, are each guarded by "if not already so", so on
+# an already-configured machine this is read-only.
 
 $script:Elevated = $false
 $script:DeveloperMode = $false
@@ -456,12 +457,16 @@ function Invoke-Preflight {
         exit 1
     }
 
+    # Before any winget download, the git install just below included.
+    Set-WingetDownloader
+
     if (Test-Command git) {
         Write-Info "git present at $((Get-Command git).Source)."
     }
     else {
         Write-Warn "git missing; installing Git.Git with winget."
-        Run @('winget', 'install', '--id', 'Git.Git', '--exact', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity') | Out-Null
+        RunRetry @('winget', 'install', '--id', 'Git.Git', '--exact', '--source', 'winget',
+            '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity') | Out-Null
         Update-SessionPath
         if (-not (Test-Command git) -and -not $DryRun) {
             Write-Err "git still not on PATH. Open a new shell and re-run."
@@ -595,8 +600,6 @@ function Set-WingetDownloader {
 
 function Invoke-LayerPackages {
     Write-Step "winget packages"
-
-    Set-WingetDownloader
 
     # The Visual C++ runtime many tools link against (uv among them), for the
     # machine's own architecture. Not in a profile file because the id differs
