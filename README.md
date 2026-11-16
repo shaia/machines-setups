@@ -22,6 +22,81 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 -DryRun -Profile go,web  
 powershell -ExecutionPolicy Bypass -File .\install.ps1 -Profile go,web
 ```
 
+## Before you start
+
+The `git clone` above is the only step that needs anything installed first.
+The installers bring everything else, Homebrew and winget packages included.
+A fresh machine usually has no git, so get it first.
+
+### Windows
+
+1. **Check winget.** It ships with Windows 11 as *App Installer*. In a
+   PowerShell window run `winget --version`. If that fails, update App
+   Installer from the Microsoft Store (or <https://aka.ms/getwinget>) and open
+   a new window.
+2. **Install git**:
+
+   ```powershell
+   winget install --id Git.Git --exact --source winget
+   ```
+
+   Then **open a new PowerShell window**. The installer adds git to PATH, but
+   a window opened before it does not see the change.
+3. **Check it**: `git --version`.
+
+Git for Windows ships Git Credential Manager, so cloning a private copy of
+this repo over HTTPS opens a browser sign-in the first time. Nothing else
+needs setting up for the clone.
+
+No git and no winget willing to run? Download the repo as a zip from GitHub
+and extract it to `$HOME\development\machines-setups`. Preflight installs git
+for you. The extracted copy does not track updates, so once git is there,
+replace it with a clone at the same path and re-run `-Only dotfiles`.
+
+The execution policy needs no change. A fresh Windows 11 refuses
+`.\install.ps1`, and the `powershell -ExecutionPolicy Bypass -File` form above
+works anyway. An elevated window is optional but saves a UAC prompt per
+machine-scope package; see [windows/README.md](windows/README.md).
+
+### macOS
+
+git comes with the Xcode Command Line Tools:
+
+```sh
+xcode-select --install
+```
+
+Accept the dialog, wait for it to finish, then check with `git --version`.
+Typing `git` in a fresh Terminal offers the same dialog. Homebrew is not
+needed beforehand; preflight installs it.
+
+### Git identity
+
+Cloning needs no identity, but committing does. Do **not** use
+`git config --global`: the dotfiles layer replaces `~/.gitconfig` with a
+symlink to [`common/git/gitconfig`](common/git/gitconfig), so `--global`
+writes would land in this repo. Put your identity in `~/.gitconfig-local`,
+which that file includes and which is never tracked:
+
+```sh
+# macOS
+git config --file ~/.gitconfig-local user.name  "Your Name"
+git config --file ~/.gitconfig-local user.email "you@example.com"
+```
+
+```powershell
+# Windows
+git config --file $HOME\.gitconfig-local user.name  "Your Name"
+git config --file $HOME\.gitconfig-local user.email "you@example.com"
+```
+
+This works before or after the install. A `~/.gitconfig` that existed before
+is backed up, not merged, so copy any identity it held into
+`~/.gitconfig-local`. The same goes for `gh auth setup-git` after the install:
+it writes its credential helper into `~/.gitconfig`, so move that block into
+`~/.gitconfig-local` too. See [Secrets and personal config](#secrets-and-personal-config)
+for what else belongs there.
+
 ## Core and profiles
 
 Every machine gets **core**, which contains:
