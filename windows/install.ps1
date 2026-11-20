@@ -126,13 +126,13 @@ function Run {
 
 # Run with retries for network-bound commands (winget, go, npm, uv, code):
 # three attempts, 5 then 15 seconds apart. A dry run never retries, because
-# Run returns 0 there.
+# Run returns 0 there. $FinalCodes are exit codes another attempt cannot change.
 function RunRetry {
-    param([Parameter(Mandatory)][string[]]$Command)
+    param([Parameter(Mandatory)][string[]]$Command, [int[]]$FinalCodes = @())
     $delays = @(5, 15)
     $code = Run $Command
     $attempt = 0
-    while ($code -ne 0 -and $attempt -lt $delays.Count) {
+    while ($code -ne 0 -and $FinalCodes -notcontains $code -and $attempt -lt $delays.Count) {
         Write-Warn "  '$($Command[0..([Math]::Min(2, $Command.Count - 1))] -join ' ')' exited $code; retrying in $($delays[$attempt])s."
         Start-Sleep -Seconds $delays[$attempt]
         $code = Run $Command
@@ -661,8 +661,11 @@ function Invoke-LayerPackages {
         if ($present -contains $id.ToLowerInvariant() -or (Test-UnlistedPackage $id)) { Add-Result ok $name; $already++; continue }
         # Installing a package winget already knows would upgrade it; the
         # presence check above is what keeps this a no-upgrade install.
+        # A hash mismatch (0x8A150011) stays until winget-pkgs updates the
+        # manifest, so it is not retried.
         $code = RunRetry @('winget', 'install', '--id', $id, '--exact', '--source', 'winget',
-            '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity')
+            '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity') `
+            -FinalCodes @(0x8A150011)
         if ($DryRun) { Add-Result changed $name 'dry run'; $added++; continue }
         # Verify rather than trust the exit code: some installers report a
         # pending reboot as failure, and some failures exit 0.
@@ -1111,6 +1114,10 @@ function Get-GoBinaryName {
     return $last
 }
 
+# The Python uv tools run on; macos/install.sh has the same value. Raise it once
+# the tools' compiled dependencies publish wheels for the newer release.
+$UvToolPython = '3.13'
+
 function Invoke-LayerTooling {
     Write-Step "PowerShell modules, Go tools, npm globals, uv Pythons and tools"
 
@@ -1159,7 +1166,10 @@ function Invoke-LayerTooling {
             # `uv tool list` prints "<name> v<version>" for each tool, then its executables.
             List = { @((Invoke-Capture @('uv', 'tool', 'list')).Output |
                     Where-Object { $_ -match '^(\S+) v' } | ForEach-Object { $Matches[1] }) }
-            Install = { param($t) RunRetry @('uv', 'tool', 'install', $t) }
+            # Pinned, because uv otherwise picks the newest Python on the machine,
+            # and a new release has no wheels yet for compiled dependencies:
+            # pre-commit's pyyaml then builds from source and fails without MSVC.
+            Install = { param($t) RunRetry @('uv', 'tool', 'install', '--python', $UvToolPython, $t) }
         }
     )
 

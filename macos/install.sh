@@ -436,6 +436,12 @@ uv_tools_installed() {
   printf ' %s ' "$(uv tool list 2>/dev/null | awk '$2 ~ /^v/ { print tolower($1) }' | tr '\n' ' ')"
 }
 
+# The Python uv tools run on; windows/install.ps1 has the same value. Pinned,
+# because uv otherwise picks the newest Python on the machine, and a new
+# release has no wheels yet for compiled dependencies such as pre-commit's
+# pyyaml. Raise it once those publish wheels for the newer release.
+UV_TOOL_PYTHON=3.13
+
 layer_tooling() {
   step "Go tools, npm globals, uv Pythons and tools, Rust toolchain"
 
@@ -508,8 +514,8 @@ layer_tooling() {
         if in_set "$lower" "$(uv_tools_installed)"; then
           result ok "uv tool $tool"
         else
-          info "uv tool install $tool"
-          run_retry uv tool install "$tool" || true
+          info "uv tool install --python $UV_TOOL_PYTHON $tool"
+          run_retry uv tool install --python "$UV_TOOL_PYTHON" "$tool" || true
           if [[ "$DRY_RUN" == true ]]; then result changed "uv tool $tool" "dry run"
           elif in_set "$lower" "$(uv_tools_installed)"; then result changed "uv tool $tool"
           else result failed "uv tool $tool" "uv tool install did not install it"; fi
