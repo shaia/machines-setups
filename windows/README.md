@@ -181,8 +181,9 @@ install the Build Tools itself.
 **Traps.**
 
 - `git config --global` writes to `~\.gitconfig`, which is a link into this
-  repo. So `gh auth setup-git` and `git lfs install` add their sections **to
-  the repo**. Move them into `~\.gitconfig-local`.
+  repo. So `gh auth setup-git` adds its section **to the repo**. Move it into
+  `~\.gitconfig-local`. Skip `git lfs install`: the shared gitconfig already
+  sets the LFS filter.
 - To check identity, use `git config --global --includes user.email`. Without
   `--includes`, git reads the named file only and does not follow the include.
 - Build drivers from the command line with the 64-bit

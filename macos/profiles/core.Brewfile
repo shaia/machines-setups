@@ -12,6 +12,7 @@ cask "font-jetbrains-mono-nerd-font"  # the glyphs the prompt draws
 # Git
 brew "git"
 brew "gh"
+brew "git-lfs"                  # Git for Windows bundles it; common/git/gitconfig sets its filter
 brew "git-delta"                # pager; common/git/delta.gitconfig
 brew "lazygit"
 

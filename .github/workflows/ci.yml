@@ -83,6 +83,7 @@ jobs:
   macos:
     name: macOS (core, go, python, web)
     runs-on: macos-latest
+          Check 'git-lfs'    { git lfs version }
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
@@ -123,3 +124,4 @@ jobs:
           name: macos-install-logs
           path: ~/.machines-setups/logs/
           if-no-files-found: ignore
+          git lfs version

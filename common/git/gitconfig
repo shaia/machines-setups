@@ -5,8 +5,9 @@
 # ignores a missing include path silently, so every include is optional.
 #
 # Careful: `git config --global` writes to ~/.gitconfig, which install links
-# to THIS file. Anything a tool adds globally (gh auth setup-git, git lfs
-# install) lands in the repo - move it into ~/.gitconfig-local.
+# to THIS file. Anything a tool adds globally (gh auth setup-git) lands in the
+# repo - move it into ~/.gitconfig-local. `git lfs install` is not needed: its
+# filter section is below.
 
 [init]
 	defaultBranch = main
@@ -44,6 +45,15 @@
 [alias]
 	# Structural, syntax-aware diff (difftastic); delta stays the default pager.
 	dft = -c diff.external=difft diff
+[filter "lfs"]
+	# What `git lfs install` would write here, set up front so it never writes
+	# into this repo. git-lfs is in core on both platforms (Git for Windows
+	# bundles it). required: a missing git-lfs fails the checkout loudly
+	# instead of leaving pointer files in the working tree.
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+	process = git-lfs filter-process
+	required = true
 
 # delta as the pager. install links this file only when delta is on PATH,
 # so a machine without it keeps git's default pager instead of erroring.

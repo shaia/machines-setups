@@ -72,8 +72,9 @@ ssh: a new machine has no ssh key yet, and that rewrite would make `git clone`
 fail until it does. If you prefer ssh, put the rewrite in `~/.gitconfig-local`.
 
 **A trap.** `git config --global` writes to `~/.gitconfig`, which is a link
-into this repo. So `gh auth setup-git` and `git lfs install` add their
-sections **to the repo**. Move them into `~/.gitconfig-local`.
+into this repo. So `gh auth setup-git` adds its section **to the repo**. Move
+it into `~/.gitconfig-local`. Skip `git lfs install`: the shared gitconfig
+already sets the LFS filter, and core installs git-lfs.
 
 ## Testing
 

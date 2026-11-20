@@ -102,7 +102,7 @@ for what else belongs there.
 Every machine gets **core**, which contains:
 
 - Warp as the terminal (iTerm2 and Windows Terminal stay configured too)
-- git, gh, delta, difftastic and act
+- git, git-lfs, gh, delta, difftastic and act
 - the starship prompt with a Nerd Font
 - ripgrep, fd, bat, eza, jq, yq, fzf, zoxide, lazygit, yazi, sd, glow, tldr, btop, dust, duf, hyperfine, gping, doggo and fastfetch
 - uv, and pre-commit installed through it
