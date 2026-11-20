@@ -1,7 +1,8 @@
 # Everyday desktop apps.
 #
-# Applied by install.sh with `brew bundle --file=<this> --no-upgrade`. The
-# cross-platform half of this profile is common/profiles/apps.txt.
+# Applied by install.sh with `brew bundle --file=<this> --no-upgrade`. This
+# profile has no cross-platform half: desktop apps need no editor extensions
+# or language tools.
 
 cask "google-chrome"
 cask "arc"
