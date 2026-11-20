@@ -895,9 +895,56 @@ function Invoke-HyperVSetup {
 #
 # winget installs Visual Studio with its default workloads. Each profile that
 # needs more ships vsconfig\<profile>.vsconfig (cpp: the C++ toolset; lowlevel:
-# the WDK, Spectre-mitigated libraries and the Performance Toolkit); the
-# installer's `modify --config` adds whatever is missing. vswhere -requires
-# answers "is every listed component present" without launching the installer.
+# the WDK, Spectre-mitigated libraries and the Performance Toolkit). The
+# component ids are the installer's own, from its catalog: a workload's
+# "Recommended" components (the boxes ticked by default in the installer UI) are
+# not added unless a config lists them, so cpp.vsconfig lists every one it wants.
+#
+# The components missing across all selected configs go to one unattended
+# `setup.exe modify --passive` run: a progress window, no questions. The
+# installer refuses --passive unless it starts elevated (exit 5007), so from a
+# non-elevated shell it is launched through one UAC prompt.
+
+# Ids of the workloads, component groups and components in a VS instance,
+# lower-cased; vswhere reads them from the instance state without launching the
+# installer.
+function Get-VsInstalledComponents {
+    param([string]$Vswhere, [string]$InstallPath)
+    $json = (Invoke-Capture @($Vswhere, '-products', $VsProductId, '-version', $VsVersionRange, '-include', 'packages', '-format', 'json')).Output -join "`n"
+    $ids = @()
+    if (-not $json.Trim()) { return $ids }
+    # Not @($json | ConvertFrom-Json): Windows PowerShell 5.1 emits a JSON
+    # array as one object, which @() would wrap instead of unrolling.
+    $instances = $json | ConvertFrom-Json
+    foreach ($instance in $instances) {
+        if ($instance.installationPath -ne $InstallPath) { continue }
+        foreach ($p in @($instance.packages)) {
+            if ([string]$p.type -in 'Workload', 'ComponentGroup', 'Component') { $ids += ([string]$p.id).ToLowerInvariant() }
+        }
+    }
+    return $ids
+}
+
+# Start-Process -Verb RunAs is the only way to raise UAC for a native command
+# from PowerShell; its output goes to the new console, not this one. $null when
+# the UAC prompt is declined.
+function Invoke-ElevatedProcess {
+    param([Parameter(Mandatory)][string[]]$Command)
+    $printed = ($Command | ForEach-Object { Format-Arg $_ }) -join ' '
+    if ($DryRun) {
+        Write-Host "  + (elevated) $printed"
+        return 0
+    }
+    $argLine = (@($Command[1..($Command.Count - 1)]) | ForEach-Object { Format-Arg $_ }) -join ' '
+    try { $p = Start-Process -FilePath $Command[0] -ArgumentList $argLine -Verb RunAs -PassThru }
+    catch { return $null }
+    # Reading Handle before exit keeps it open; without it ExitCode reads back
+    # empty. WaitForExit rather than -Wait, which also waits for every
+    # descendant, and the installer leaves its service running.
+    $null = $p.Handle
+    $p.WaitForExit()
+    return $p.ExitCode
+}
 
 function Invoke-LayerVs {
     Write-Step "Visual Studio workloads"
@@ -922,27 +969,52 @@ function Invoke-LayerVs {
         return
     }
 
+    $wanted = [ordered]@{}
     foreach ($cfg in $configs) {
-        $name = Split-Path -Leaf $cfg
-        $components = @((Get-Content -LiteralPath $cfg -Raw | ConvertFrom-Json).components)
-        $query = @($vswhere, '-products', $VsProductId, '-version', $VsVersionRange, '-requires') + $components + @('-property', 'installationPath')
-        $satisfied = (Invoke-Capture $query).Output | Select-Object -First 1
-        if ($satisfied) {
-            Add-Result ok "Visual Studio $name ($($components.Count) components)"
-            continue
-        }
-        # --passive does not elevate itself: from a non-elevated shell the
-        # installer exits 5007 ("should be run elevated from the beginning").
-        if (-not $script:Elevated) {
-            Add-ElevatedCommand "Visual Studio $name" ("& '$setup' modify --installPath '$installPath' --config '$cfg' --passive --norestart")
-            continue
-        }
-        Write-Info "${name}: adding missing components."
-        $code = Run @($setup, 'modify', '--installPath', $installPath, '--config', $cfg, '--passive', '--norestart')
-        if ($DryRun) { Add-Result changed "Visual Studio $name" 'dry run'; continue }
-        if ((Invoke-Capture $query).Output | Select-Object -First 1) { Add-Result changed "Visual Studio $name" }
+        $wanted[(Split-Path -Leaf $cfg)] = @((Get-Content -LiteralPath $cfg -Raw | ConvertFrom-Json).components)
+    }
+    $present = @(Get-VsInstalledComponents $vswhere $installPath)
+    $missing = @()
+    $pending = @()
+    foreach ($name in $wanted.Keys) {
+        $gap = @($wanted[$name] | Where-Object { $present -notcontains $_.ToLowerInvariant() })
+        if ($gap.Count -eq 0) { Add-Result ok "Visual Studio $name ($($wanted[$name].Count) components)"; continue }
+        $pending += $name
+        foreach ($id in $gap) { if ($missing -notcontains $id) { $missing += $id } }
+    }
+    if ($missing.Count -eq 0) { return }
+
+    # A second installer instance (the installer window left open, or another
+    # modify in progress) makes this one fail with a lock error.
+    $busy = @(Get-Process -Name setup -ErrorAction SilentlyContinue | Where-Object {
+            try { $_.Path -eq $setup } catch { $false } })
+    if ($busy.Count -gt 0 -and -not $DryRun) {
+        Add-Result flagged 'Visual Studio workloads' "the Visual Studio Installer is already open; close it and re-run -Only vs ($($missing.Count) components missing)"
+        return
+    }
+
+    Write-Info "Adding $($missing.Count) Visual Studio components unattended: $($missing -join ', ')."
+    $command = @($setup, 'modify', '--installPath', $installPath)
+    foreach ($id in $missing) { $command += @('--add', $id) }
+    $command += @('--passive', '--norestart')
+    if ($script:Elevated) { $code = Run $command }
+    else {
+        Write-Info "Asking for elevation once (UAC) for the Visual Studio Installer."
+        $code = Invoke-ElevatedProcess $command
+    }
+    if ($null -eq $code) {
+        Add-ElevatedCommand 'Visual Studio workloads' (($command | ForEach-Object { Format-Arg $_ }) -join ' ')
+        return
+    }
+
+    $present = @()
+    if (-not $DryRun) { $present = @(Get-VsInstalledComponents $vswhere $installPath) }
+    foreach ($name in $pending) {
+        $gap = @($wanted[$name] | Where-Object { $present -notcontains $_.ToLowerInvariant() })
+        if ($DryRun) { Add-Result changed "Visual Studio $name" 'dry run' }
+        elseif ($gap.Count -eq 0) { Add-Result changed "Visual Studio $name" }
         elseif ($code -in 1641, 3010) { Add-Result flagged "Visual Studio $name" "setup.exe modify exited $code; reboot and re-run -Only vs" }
-        else { Add-Result failed "Visual Studio $name" "setup.exe modify exited $code and components are still missing; close Visual Studio and re-run -Only vs (logs: %TEMP%\dd_installer_*.log)" }
+        else { Add-Result failed "Visual Studio $name" "setup.exe modify exited $code; still missing $($gap -join ', '); close Visual Studio and re-run -Only vs (logs: %TEMP%\dd_installer_*.log)" }
     }
 }
 

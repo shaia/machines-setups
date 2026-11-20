@@ -24,7 +24,7 @@ shell is elevated and whether Developer Mode is on. Then six layers run:
 | --- | --- |
 | `packages` | `winget install --id --exact` for every id in `profiles\core.txt` and each selected profile that `winget export` does not already report, so nothing is upgraded |
 | `system` | Per-user, applied directly: Explorer shows file extensions, hidden files and the full path in the title bar; taskbar End Task; no web results in Start search. Machine-wide, applied when elevated and otherwise queued in the summary: long paths, Developer Mode, Windows' inline `sudo`. Then WSL 2 with Ubuntu, and Hyper-V when `lowlevel` is selected |
-| `vs` | Applies `vsconfig\<profile>.vsconfig` for each selected profile that has one (`cpp`, `lowlevel`) to Visual Studio 2026 Community with `setup.exe modify`, when `vswhere -requires` says a component is missing |
+| `vs` | Adds the components in `vsconfig\<profile>.vsconfig` for each selected profile that has one (`cpp`, `lowlevel`) that `vswhere` does not list in Visual Studio 2026 Community, in one unattended `setup.exe modify --passive` run. From a non-elevated shell that run asks for UAC once; elevated, it asks nothing. A config lists every component it wants, the installer's "Recommended" defaults included, because the installer adds none of them on its own |
 | `dotfiles` | Backs up, then symlinks, `.gitconfig`, `.config\git\ignore`, `.config\starship.toml` and the pwsh `profile.ps1` and `shell-ux.ps1`. Also `.config\git\delta.gitconfig` once delta is installed. Sets Windows Terminal's default profile and font |
 | `tooling` | PowerShell modules into pwsh 7, `go install` tools, npm globals, `uv python install`, `uv tool install` |
 | `extensions` | VS Code extensions from `common\profiles\` |
