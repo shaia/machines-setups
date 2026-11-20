@@ -3,7 +3,8 @@ name: CI
 # Runs both installers on clean GitHub-hosted machines, which is the one thing
 # no dry run can prove. Each job installs core plus a few profiles, runs the
 # installer a second time and requires it to change nothing, then checks from
-# a fresh shell that the toolchains actually work.
+# a fresh shell that the toolchains actually work. Two quick jobs check that
+# every package id in every profile still resolves, installed here or not.
 
 on:
   push:
@@ -22,6 +23,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The install jobs below cover four profiles; these look up the ids of all of
+  # them, installing nothing, so a renamed or removed package anywhere fails
+  # here within a week.
+  winget-ids:
+    name: winget ids resolve (all profiles)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Look up every winget id and PowerShell module
+        shell: pwsh
+        run: ./.github/scripts/check-winget-ids.ps1
+
+  brew-ids:
+    # Reads Homebrew's published catalogs, so it needs no Mac.
+    name: Homebrew names resolve (all profiles)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Look up every brew and cask name
+        run: python3 .github/scripts/check-brew-ids.py
+
   windows:
     name: Windows (core, go, python, web)
     runs-on: windows-latest
@@ -59,6 +83,7 @@ jobs:
             "ok  $what  $($out.Trim() -split "`n" | Select-Object -First 1)"
           }
           Check 'git'        { git --version }
+          Check 'git-lfs'    { git lfs version }
           Check 'gh'         { gh --version }
           Check 'rg'         { rg --version }
           Check 'starship'   { starship --version }
@@ -83,7 +108,6 @@ jobs:
   macos:
     name: macOS (core, go, python, web)
     runs-on: macos-latest
-          Check 'git-lfs'    { git lfs version }
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
@@ -104,6 +128,7 @@ jobs:
         run: |
           set -e
           git --version
+          git lfs version
           gh --version | head -n 1
           rg --version | head -n 1
           starship --version | head -n 1
@@ -124,4 +149,3 @@ jobs:
           name: macos-install-logs
           path: ~/.machines-setups/logs/
           if-no-files-found: ignore
-          git lfs version

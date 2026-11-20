@@ -146,6 +146,9 @@ windows/
   profiles/<name>.txt   winget ids, plus `psmodule`, `requires <profile>` and Windows-only `vscode` lines
   vsconfig/<name>.vsconfig  Visual Studio components a profile adds (cpp, lowlevel)
   dotfiles/powershell/  profile.ps1, shell-ux.ps1
+.github/
+  workflows/ci.yml      installs on clean runners; checks every package id
+  scripts/              the package-id checks, runnable locally too
 ```
 
 Each profile has two halves. The platform half is a Brewfile or a winget list.
@@ -219,7 +222,12 @@ needs registering. To add a tool to an existing profile, add one line.
   runs both installers on fresh GitHub-hosted Windows and macOS runners, on
   every push, every pull request and weekly. Each job installs core plus go,
   python and web, runs a second time and requires it to change nothing, then
-  checks the toolchains from a fresh shell.
+  checks the toolchains from a fresh shell. Two faster jobs look up every
+  package in every profile, installing nothing: winget ids and PowerShell
+  modules with [`check-winget-ids.ps1`](.github/scripts/check-winget-ids.ps1),
+  and Homebrew names against Homebrew's catalog with
+  [`check-brew-ids.py`](.github/scripts/check-brew-ids.py), which also warns on
+  deprecated and renamed packages. Run either before adding a line.
 
 ## Secrets and personal config
 
