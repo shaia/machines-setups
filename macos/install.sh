@@ -9,6 +9,11 @@
 #   ./install.sh --only dotfiles          # just that layer
 #   ./install.sh --skip extensions        # every layer but that one
 #   ./install.sh --dry-run                # print every mutating command, run none
+#   ./install.sh --headless               # no GUI dialogs (implied over SSH)
+#
+# Headless runs (over SSH, or with the console owned by someone else) install
+# the Command Line Tools through softwareupdate instead of the GUI dialog
+# nobody would see, and stop early when sudo has no terminal to ask on.
 #
 # Profiles live in two halves: macos/profiles/<name>.Brewfile and
 # common/profiles/<name>.txt (VS Code extensions, Go tools, npm globals, uv
@@ -45,7 +50,13 @@ esac
 ALL_LAYERS="packages zsh dotfiles tooling extensions"
 LAYERS="$ALL_LAYERS"
 DRY_RUN=false
+HEADLESS=false
+HEADLESS_REASON=""
 REQUESTED_PROFILES=""
+
+# softwareupdate lists the Command Line Tools only while this placeholder
+# exists. Homebrew's own installer relies on the same file.
+CLT_PLACEHOLDER="/tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress"
 
 # --- Output helpers ----------------------------------------------------------
 
@@ -195,6 +206,7 @@ Usage: install.sh [options]
   --only    <layers> Run only these layers (comma-separated).
   --skip    <layers> Run every layer except these.
   --dry-run          Print every mutating command without running it.
+  --headless         Assume no one can answer a GUI dialog. Implied over SSH.
   -h, --help         This message.
 
 Profiles: $AVAILABLE_PROFILES
@@ -234,6 +246,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --dry-run) DRY_RUN=true; shift ;;
+    --headless) HEADLESS=true; shift ;;
     -h|--help) usage 0 ;;
     *) error "Unknown option: $1"; usage 2 ;;
   esac
@@ -250,14 +263,87 @@ done
 # Always runs. Its mutating actions are all guarded by "if missing", so on an
 # already-configured machine this is read-only.
 
+# Whether a GUI dialog would reach the person running this. It would not over
+# SSH, nor when the console belongs to another user or to the login window
+# (which owns it as root).
+detect_headless() {
+  if [[ "$HEADLESS" == true ]]; then HEADLESS_REASON="--headless"; return 0; fi
+  if [[ -n "${SSH_CONNECTION:-}${SSH_CLIENT:-}${SSH_TTY:-}" ]]; then
+    HEADLESS=true; HEADLESS_REASON="SSH session"; return 0
+  fi
+  console="$(stat -f%Su /dev/console 2>/dev/null || true)"
+  if [[ -n "$console" && "$console" != "$(id -un)" ]]; then
+    HEADLESS=true; HEADLESS_REASON="the console belongs to $console"
+  fi
+  return 0
+}
+
+# The headless route to the Command Line Tools, the one Homebrew's installer
+# takes: with the placeholder present, softwareupdate lists them, and the
+# newest label is installed. Needs sudo.
+install_clt_headless() {
+  if [[ "$DRY_RUN" == true ]]; then
+    printf '  + touch %s; softwareupdate -l\n' "$CLT_PLACEHOLDER"
+    printf '  + sudo softwareupdate -i "<newest Command Line Tools label>"\n'
+    printf '  + sudo xcode-select --switch /Library/Developer/CommandLineTools\n'
+    return 0
+  fi
+  touch "$CLT_PLACEHOLDER"
+  info "Asking Software Update for the newest Command Line Tools (this takes a minute)."
+  label="$(softwareupdate -l 2>/dev/null | grep -B 1 -E 'Command Line Tools' \
+    | awk -F'*' '/^ *\*/ { print $2 }' | sed -e 's/^ *Label: //' -e 's/^ *//' \
+    | sort -V | tail -n 1)" || label=""
+  clt_status=1
+  if [[ -z "$label" ]]; then
+    error "Software Update lists no Command Line Tools package."
+  elif run_retry sudo softwareupdate -i "$label" \
+    && sudo xcode-select --switch /Library/Developer/CommandLineTools; then
+    clt_status=0
+  fi
+  rm -f "$CLT_PLACEHOLDER"
+  return $clt_status
+}
+
 preflight() {
   step "Preflight"
 
   [[ "$(uname -s)" == "Darwin" ]] || { error "macOS only; this is $(uname -s)."; exit 1; }
   info "macOS on $(uname -m); Homebrew prefix $BREW_PREFIX."
 
+  detect_headless
+  if [[ "$HEADLESS" == true ]]; then
+    info "Headless ($HEADLESS_REASON): no GUI dialogs; Command Line Tools come from softwareupdate."
+  fi
+  if [[ -n "${SSH_CONNECTION:-}${SSH_CLIENT:-}" && -z "${TMUX:-}${STY:-}" ]]; then
+    warn "Over SSH outside tmux or screen, a dropped connection stops the run. Re-running"
+    warn "  is safe and skips what is done; to avoid it, start the run inside tmux or screen."
+  fi
+
+  # sudo reads its password from the terminal, and `ssh host cmd` without -t
+  # gives it none. Installing the Command Line Tools or Homebrew needs sudo,
+  # so without a terminal or passwordless sudo, stop here rather than partway.
+  needs_sudo=false
+  xcode-select -p >/dev/null 2>&1 || needs_sudo=true
+  command -v brew >/dev/null 2>&1 || [[ -x "$BREW_PREFIX/bin/brew" ]] || needs_sudo=true
+  if [[ ! -t 0 && "$DRY_RUN" == false ]] && ! sudo -n true 2>/dev/null; then
+    if [[ "$needs_sudo" == true ]]; then
+      error "Installing the Command Line Tools or Homebrew needs sudo, and with no terminal it cannot"
+      error "ask for your password. Reconnect with a terminal (ssh -t <host> ...) and re-run."
+      exit 1
+    fi
+    warn "No terminal for sudo to ask on: casks that install a .pkg will fail and be reported."
+    warn "  Run from an interactive SSH session (or ssh -t) to let sudo ask."
+  fi
+
   if xcode-select -p >/dev/null 2>&1; then
     info "Xcode Command Line Tools present at $(xcode-select -p)."
+  elif [[ "$HEADLESS" == true ]]; then
+    warn "Xcode Command Line Tools missing; installing them with softwareupdate (asks for sudo)."
+    install_clt_headless || { error "Command Line Tools installation failed."; exit 1; }
+    if [[ "$DRY_RUN" == false ]] && ! xcode-select -p >/dev/null 2>&1; then
+      error "softwareupdate finished, but xcode-select still finds no Command Line Tools."
+      exit 1
+    fi
   else
     warn "Xcode Command Line Tools missing; launching the installer."
     run xcode-select --install || true
@@ -607,6 +693,13 @@ main() {
     exit 3
   fi
   trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
+
+  # A long run on a Mac nobody is touching, as one driven over SSH is, can be
+  # cut short by idle sleep. caffeinate holds that off until this process
+  # exits. Started before the tee below, so it does not hold the log pipe open.
+  if [[ "$DRY_RUN" == false ]] && command -v caffeinate >/dev/null 2>&1; then
+    caffeinate -i -w $$ &
+  fi
 
   # A log of every run, dry runs included, for when the terminal has scrolled away.
   mkdir -p "$LOG_DIR"

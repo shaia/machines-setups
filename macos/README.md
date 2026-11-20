@@ -12,7 +12,8 @@ them. This file covers what is specific to macOS.
 ## Layers
 
 Preflight always runs. It checks for the Xcode Command Line Tools and installs
-Homebrew if it is missing. Then five layers run:
+Homebrew if it is missing. Over SSH it installs missing Command Line Tools
+itself (see [Over SSH](#over-ssh)). Then five layers run:
 
 | Layer | Does |
 | --- | --- |
@@ -75,6 +76,40 @@ fail until it does. If you prefer ssh, put the rewrite in `~/.gitconfig-local`.
 into this repo. So `gh auth setup-git` adds its section **to the repo**. Move
 it into `~/.gitconfig-local`. Skip `git lfs install`: the shared gitconfig
 already sets the LFS filter, and core installs git-lfs.
+
+## Over SSH
+
+The run is headless when it comes over SSH (`SSH_CONNECTION` is set), when the
+console belongs to another user or to the login window, or with `--headless`.
+Preflight says so. Three things change:
+
+- **Command Line Tools come from `softwareupdate`.** The dialog
+  `xcode-select --install` opens would appear on a screen nobody is looking
+  at. Instead preflight creates the placeholder file that makes Software
+  Update list the tools, installs the newest label with `sudo`, and points
+  `xcode-select` at it. Homebrew's own installer uses the same method.
+- **sudo needs a terminal.** Connect with `ssh host` or `ssh -t host '...'`.
+  Without a terminal, and without passwordless sudo, preflight stops when the
+  Command Line Tools or Homebrew are missing, and warns otherwise: casks that
+  install with a `.pkg` will fail and be reported.
+- **A dropped connection stops the run.** Preflight warns when the run is not
+  inside `tmux` or `screen`. Re-running is safe. Every run also holds off idle
+  sleep with `caffeinate` until it exits.
+
+A fresh Mac has no git to clone with, and over SSH the GUI installer is no
+help. Install the Command Line Tools by hand first, the same way preflight
+does:
+
+```sh
+touch /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress
+label="$(softwareupdate -l | grep -B 1 -E 'Command Line Tools' | awk -F'*' '/^ *\*/ { print $2 }' \
+  | sed -e 's/^ *Label: //' -e 's/^ *//' | sort -V | tail -n 1)"
+sudo softwareupdate -i "$label"
+rm /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress
+```
+
+GUI apps (Warp, VS Code, iTerm2, fonts) still install, ready for when you sit
+at the machine.
 
 ## Testing
 
