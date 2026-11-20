@@ -117,7 +117,7 @@ Everything else is a **profile**, chosen at install time:
 | `go` | Go, plus gopls, dlv, staticcheck and golangci-lint |
 | `python` | Python 3.13 through uv (which is in core). Ruff, Pylance and debugpy |
 | `web` | Node, pnpm, xh, mkcert, Bruno, HTTP Toolkit, ESLint and Prettier |
-| `dotnet` | .NET SDK 10 (LTS) and C# Dev Kit |
+| `dotnet` | The newest .NET SDK (11) and C# Dev Kit |
 | `rust` | rustup with the stable toolchain, and rust-analyzer |
 | `java` | Amazon Corretto 21 and the Java extension pack |
 | `containers` | Docker Desktop (with WSL on Windows), kubectl, kubectx, helm, k9s, kind, stern, lazydocker, dive |

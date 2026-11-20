@@ -4,4 +4,7 @@
 # unless already installed. The cross-platform half of this profile is
 # common/profiles/dotnet.txt.
 
-Microsoft.DotNet.SDK.10            # current LTS
+# The newest SDK, matching macOS, whose dotnet-sdk cask always ships the newest.
+# It builds older target frameworks (net10.0, net8.0) too. Move this id when
+# the next major ships, or the two platforms drift apart.
+Microsoft.DotNet.SDK.11
