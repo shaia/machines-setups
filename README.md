@@ -119,7 +119,7 @@ Everything else is a **profile**, chosen at install time:
 | `web` | Node, pnpm, xh, mkcert, Bruno, HTTP Toolkit, ESLint and Prettier |
 | `dotnet` | The newest .NET SDK (11) and C# Dev Kit |
 | `rust` | rustup with the stable toolchain, and rust-analyzer |
-| `java` | Amazon Corretto 21 and the Java extension pack |
+| `java` | Amazon Corretto 25 (LTS) and the Java extension pack. Maven and Gradle come from each project's wrapper |
 | `containers` | Docker Desktop (with WSL on Windows), kubectl, kubectx, helm, k9s, kind, stern, lazydocker, dive |
 | `cloud` | AWS CLI, OpenTofu, Terragrunt |
 | `ai` | Ollama, the Claude desktop app, Claude Code, Gemini CLI and Codex CLI, plus the Claude Code extension |

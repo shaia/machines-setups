@@ -1296,7 +1296,7 @@ function Invoke-LayerTooling {
         Write-Host ""
         Write-Host "  lowlevel tools that are not on winget:"
         Write-Host "  Ghidra                 # github.com/NationalSecurityAgency/ghidra/releases; unzip, needs a"
-        Write-Host "                         # JDK 21 (the java profile installs Corretto 21)"
+        Write-Host "                         # JDK 21 or newer (the java profile installs Corretto 25)"
         Write-Host "  Intel VTune            # Intel oneAPI site; CPU profiling on Intel hardware"
         Write-Host "  AMD uProf              # AMD developer site; CPU profiling on AMD hardware"
         Write-Host "  OSR Driver Loader      # osronline.com; test-load unsigned drivers in a VM"
