@@ -31,9 +31,18 @@ A fresh machine usually has no git, so get it first.
 ### Windows
 
 1. **Check winget.** It ships with Windows 11 as *App Installer*. In a
-   PowerShell window run `winget --version`. If that fails, update App
-   Installer from the Microsoft Store (or <https://aka.ms/getwinget>) and open
-   a new window.
+   PowerShell window run `winget --version`. If that fails (Windows Server,
+   LTSC, or a machine where the Microsoft Store is missing or blocked),
+   install it without the Store, the way preflight does, from Windows
+   PowerShell:
+
+   ```powershell
+   Install-PackageProvider -Name NuGet -Scope CurrentUser -Force | Out-Null
+   Install-Module -Name Microsoft.WinGet.Client -RequiredVersion 1.29.380 -Scope CurrentUser -Repository PSGallery -Force
+   Repair-WinGetPackageManager -Version 1.29.380 -AllUsers   # -AllUsers needs an elevated window; drop it otherwise
+   ```
+
+   Then open a new window.
 2. **Install git**:
 
    ```powershell
@@ -49,8 +58,8 @@ this repo over HTTPS opens a browser sign-in the first time. Nothing else
 needs setting up for the clone.
 
 No git and no winget willing to run? Download the repo as a zip from GitHub
-and extract it to `$HOME\development\machines-setups`. Preflight installs git
-for you. The extracted copy does not track updates, so once git is there,
+and extract it to `$HOME\development\machines-setups`. Preflight installs
+winget (without the Store) and git for you. The extracted copy does not track updates, so once git is there,
 replace it with a clone at the same path and re-run `-Only dotfiles`.
 
 The execution policy needs no change. A fresh Windows 11 refuses
@@ -69,6 +78,28 @@ xcode-select --install
 Accept the dialog, wait for it to finish, then check with `git --version`.
 Typing `git` in a fresh Terminal offers the same dialog. Homebrew is not
 needed beforehand; preflight installs it.
+
+### Over SSH
+
+Both installers run on a machine you reach only over SSH, with the same
+commands. They notice the session is headless and stop relying on dialogs:
+macOS installs the Command Line Tools through `softwareupdate` instead of the
+GUI installer, and Windows runs installers silently and never waits on a UAC
+prompt. `--headless` / `-Headless` forces this mode when detection misses it.
+The packages are the same as at the desk, GUI apps included.
+
+- **macOS: use a terminal.** `sudo` reads its password from one, so connect
+  with `ssh host` or `ssh -t host '...'`, not `ssh host '...'`. Without one,
+  preflight stops if the Command Line Tools or Homebrew are missing.
+  On a fresh Mac, install the Command Line Tools before cloning. The headless
+  form of `xcode-select --install` is in
+  [macos/README.md](macos/README.md#over-ssh).
+- **Windows: connect elevated.** No desktop means no UAC prompt, so the
+  packages layer needs a session that is already elevated; preflight says
+  whether it is. Some MSIX packages also need the account to have signed in
+  interactively once. See [windows/README.md](windows/README.md).
+- **A dropped connection stops the run.** Re-run it; finished work is
+  skipped. On macOS, start it inside `tmux` or `screen` to survive a drop.
 
 ### Git identity
 

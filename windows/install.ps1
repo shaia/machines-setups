@@ -11,6 +11,12 @@ gets, plus the language and tool profiles you pick.
   .\install.ps1 -Only dotfiles             # just that layer
   .\install.ps1 -Skip extensions           # every layer but that one
   .\install.ps1 -DryRun                    # print every mutating command, run none
+  .\install.ps1 -Headless                  # no dialogs or UAC (implied over SSH)
+
+Headless runs (OpenSSH, PowerShell remoting, session 0) run installers
+silently, never wait on a UAC prompt no one can see, and repair winget's
+package source when the session cannot set it up itself. They need an
+elevated session for the packages layer.
 
 A fresh Windows install refuses to run local scripts until the execution
 policy allows it; this form works regardless:
@@ -37,6 +43,7 @@ param(
     [string[]]$Only,
     [string[]]$Skip,
     [switch]$DryRun,
+    [switch]$Headless,
     [switch]$Help
 )
 
@@ -71,6 +78,12 @@ $NerdFontFace = 'JetBrainsMono NF'
 # The cpp profile's Visual Studio: VS 2026 (installer major version 18) Community.
 $VsProductId = 'Microsoft.VisualStudio.Product.Community'
 $VsVersionRange = '[18.0,19.0)'
+
+# The winget client preflight installs when a machine has none, and the
+# Microsoft.WinGet.Client module that installs it. The two release in lockstep
+# under one version number. To update: take a newer stable release of
+# microsoft/winget-cli that PSGallery also has as the module, and change this.
+$WingetClientVersion = '1.29.380'
 
 $AllLayers = @('packages', 'system', 'vs', 'dotfiles', 'tooling', 'extensions')
 $WslDistro = 'Ubuntu'
@@ -362,6 +375,8 @@ Usage: install.ps1 [options]
   -Only    <layers> Run only these layers (comma-separated).
   -Skip    <layers> Run every layer except these.
   -DryRun           Print every mutating command without running it.
+  -Headless         Assume no one can answer a dialog or UAC prompt. Implied
+                    over SSH, PowerShell remoting and in session 0.
   -Help             This message.
 
 Profiles: $($AvailableProfiles -join ', ')
@@ -424,6 +439,115 @@ function Wants { param([string]$Layer) return ($Layers -contains $Layer) }
 
 $script:Elevated = $false
 $script:DeveloperMode = $false
+# Why no one can answer a dialog here, or $null when someone can.
+$script:HeadlessReason = $null
+# Extra winget install arguments: --silent when headless, so no installer
+# opens a window on a desktop that does not exist.
+$script:WingetModeArgs = @()
+
+# Whether anyone can see a dialog or a UAC prompt: not over SSH or PowerShell
+# remoting, and not in session 0, where services and everything they start run
+# with no desktop.
+function Get-HeadlessReason {
+    if ($Headless) { return '-Headless' }
+    if ($env:SSH_CONNECTION -or $env:SSH_CLIENT) { return 'SSH session' }
+    if ($null -ne (Get-Variable -Name PSSenderInfo -ValueOnly -ErrorAction SilentlyContinue)) { return 'PowerShell remoting session' }
+    if ([Diagnostics.Process]::GetCurrentProcess().SessionId -eq 0) { return 'session 0, no desktop' }
+    return $null
+}
+
+# winget ships inside App Installer, which Windows registers for an account at
+# its first interactive sign-in. An account only ever reached over SSH can have
+# it provisioned but unregistered; this registration is what that sign-in does.
+# Through Windows PowerShell, whose Appx module works everywhere.
+function Register-AppInstaller {
+    Write-Warn "winget is not registered for this account (no interactive sign-in yet); registering App Installer."
+    $null = Run @('powershell', '-NoProfile', '-NonInteractive', '-Command',
+        'Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe')
+    Update-SessionPath
+}
+
+# winget without the Microsoft Store, for Windows Server, LTSC, a Store that
+# policy blocks, or an SSH-only machine: Microsoft's own route (the winget docs'
+# Windows Sandbox script), Repair-WinGetPackageManager from the
+# Microsoft.WinGet.Client module. It installs App Installer and its framework
+# dependencies from the winget-cli GitHub release; Windows checks their
+# Microsoft signatures. Module and client are pinned to one version.
+# Through Windows PowerShell, so the module lands where 5.1 can load it; the
+# NuGet provider is what its PowerShellGet 1.0 needs to reach PSGallery, and
+# TLS 1.2 is what PSGallery requires of it.
+function Install-WingetWithoutStore {
+    # -AllUsers provisions winget for every account, and needs elevation.
+    $allUsers = ''
+    if ($script:Elevated) { $allUsers = ' -AllUsers' }
+    $v = $WingetClientVersion
+    $steps = @(
+        'Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Scope CurrentUser -Force | Out-Null'
+        "Install-Module -Name Microsoft.WinGet.Client -RequiredVersion $v -Scope CurrentUser -Repository PSGallery -Force"
+        "Import-Module Microsoft.WinGet.Client -RequiredVersion $v"
+        "Repair-WinGetPackageManager -Version $v$allUsers"
+    )
+    Write-Warn "winget is missing; installing winget $v without the Microsoft Store (Microsoft.WinGet.Client from PSGallery)."
+    if ($DryRun) {
+        foreach ($s in $steps) { Write-Host "  + $s" }
+        return
+    }
+    $bootstrap = (@(
+            '$ErrorActionPreference = ''Stop''; $ProgressPreference = ''SilentlyContinue'''
+            '[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12'
+        ) + $steps) -join '; '
+    $code = Run @('powershell', '-NoProfile', '-NonInteractive', '-Command',
+        "try { $bootstrap } catch { Write-Host `$_.Exception.Message; exit 1 }")
+    if ($code -ne 0) { Write-Warn "  The winget bootstrap exited $code." }
+    Update-SessionPath
+}
+
+# Outside an interactive logon winget cannot install its own package source:
+# Windows refuses the package (winget-cli#6334), and every source operation
+# then fails with 0x8A15000F, "Data required by the source is missing". Adding
+# the same package from PowerShell works. The URL serves the current index, so
+# it cannot be pinned to a hash; it is checked by its Microsoft signature.
+$WingetSourceUrl = 'https://cdn.winget.microsoft.com/cache/source2.msix'
+
+function Test-WingetSource {
+    $r = Invoke-Capture @('winget', 'search', '--id', 'Git.Git', '--exact', '--source', 'winget',
+        '--accept-source-agreements', '--disable-interactivity')
+    return ($r.ExitCode -eq 0)
+}
+
+# Returns $true when the winget source works, after repairing it if needed.
+function Repair-WingetSource {
+    $label = 'winget source usable in this session'
+    if (Test-WingetSource) { Add-Result ok $label; return $true }
+    Write-Warn "winget cannot open its package source in this session; adding it from $WingetSourceUrl."
+    if ($DryRun) {
+        Write-Host "  + download $WingetSourceUrl, check it is signed by Microsoft, Add-AppxPackage it"
+        Add-Result changed $label 'dry run'
+        return $true
+    }
+    $tmp = Join-Path $env:TEMP "winget-source-$PID.msix"
+    $ProgressPreference = 'SilentlyContinue'
+    try {
+        Invoke-WebRequest -Uri $WingetSourceUrl -OutFile $tmp -UseBasicParsing
+        $sig = Get-AuthenticodeSignature -LiteralPath $tmp
+        if ($sig.Status -ne 'Valid' -or $null -eq $sig.SignerCertificate -or
+            $sig.SignerCertificate.Subject -notmatch '(^|, )O=Microsoft Corporation(,|$)') {
+            Write-Err "$WingetSourceUrl is not validly signed by Microsoft ($($sig.Status)); not installing it."
+            return $false
+        }
+        $quoted = $tmp -replace "'", "''"
+        $null = Run @('powershell', '-NoProfile', '-NonInteractive', '-Command', "Add-AppxPackage -Path '$quoted'")
+    }
+    catch {
+        Write-Err "Could not add the winget source package: $($_.Exception.Message)"
+        return $false
+    }
+    finally {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-WingetSource) { Add-Result changed $label; return $true }
+    return $false
+}
 
 function Invoke-Preflight {
     Write-Step "Preflight"
@@ -442,31 +566,66 @@ function Invoke-Preflight {
 
     $script:Elevated = Test-Elevated
     $script:DeveloperMode = Test-DeveloperMode
+    $script:HeadlessReason = Get-HeadlessReason
     if ($script:Elevated) { Write-Info "Running elevated: file symlinks work, and winget installs will not prompt." }
-    else { Write-Info "Not elevated: each machine-scope winget install raises its own UAC prompt." }
+    elseif (-not $script:HeadlessReason) { Write-Info "Not elevated: each machine-scope winget install raises its own UAC prompt." }
     if ($script:DeveloperMode) { Write-Info "Developer Mode is on: file symlinks work without elevation." }
     elseif (-not $script:Elevated) { Write-Warn "Developer Mode is off and the shell is not elevated; the dotfiles layer cannot create file symlinks." }
+
+    if ($script:HeadlessReason) {
+        $script:WingetModeArgs = @('--silent')
+        Write-Info "Headless ($($script:HeadlessReason)): installers run silently, and nothing waits on a UAC prompt."
+        if (-not $script:Elevated) {
+            # Most packages install machine-wide, and each would raise a UAC
+            # prompt that cannot appear here; they would all fail one by one.
+            if ((Wants 'packages') -and -not $DryRun) {
+                Write-Err "The packages layer needs an elevated session when headless: machine-wide installers"
+                Write-Err "ask for UAC consent, and there is no desktop to show the prompt on. Reconnect with an"
+                Write-Err "account whose session is elevated (preflight says 'Running elevated'), or -Skip packages."
+                exit 1
+            }
+            Write-Warn "Not elevated: machine-wide settings and Visual Studio components are queued in the summary."
+        }
+        if ($env:SSH_CONNECTION -or $env:SSH_CLIENT) {
+            Write-Warn "A dropped SSH connection stops the run. Re-running is safe and skips what is done."
+        }
+        if (-not (Test-Command winget)) { Register-AppInstaller }
+    }
+    if (-not (Test-Command winget)) { Install-WingetWithoutStore }
 
     if (Test-Command winget) {
         $v = (Invoke-Capture @('winget', '--version')).Output | Select-Object -First 1
         Write-Info "winget present ($v)."
     }
+    elseif ($DryRun) {
+        Write-Err "Dry run: every later step needs winget. Re-run without -DryRun to install it first."
+        exit 1
+    }
     else {
-        Write-Err "winget is missing. It ships with Windows 11 as 'App Installer'; update that from the"
-        Write-Err "Microsoft Store (or https://aka.ms/getwinget), open a new shell, and re-run."
+        Write-Err "winget is still missing after the install above. Open a new shell and re-run; if it is"
+        Write-Err "still missing, install it by hand from https://github.com/microsoft/winget-cli/releases."
         exit 1
     }
 
     # Before any winget download, the git install just below included.
     Set-WingetDownloader
 
+    if ($script:HeadlessReason -and -not (Repair-WingetSource)) {
+        $hint = 'sign in to this account once at the console or over RDP, then re-run'
+        if ((Wants 'packages') -or -not (Test-Command git)) {
+            Write-Err "winget still cannot open its package source in this session. Check the network, or $hint."
+            exit 1
+        }
+        Add-Result flagged 'winget source usable in this session' $hint
+    }
+
     if (Test-Command git) {
         Write-Info "git present at $((Get-Command git).Source)."
     }
     else {
         Write-Warn "git missing; installing Git.Git with winget."
-        RunRetry @('winget', 'install', '--id', 'Git.Git', '--exact', '--source', 'winget',
-            '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity') | Out-Null
+        RunRetry (@('winget', 'install', '--id', 'Git.Git', '--exact', '--source', 'winget',
+            '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity') + $script:WingetModeArgs) | Out-Null
         Update-SessionPath
         if (-not (Test-Command git) -and -not $DryRun) {
             Write-Err "git still not on PATH. Open a new shell and re-run."
@@ -540,6 +699,9 @@ function Get-WingetFailureReason {
         '0x8A150014' { $reason += "; the id is gone, so 'winget search' may find it renamed" }
         '0x8A150101' { $reason += '; close the app and re-run' }
         '0x8A150109' { $reason += '; reboot and re-run' }
+        # An MSIX install over SSH: Windows deploys packages only for a user
+        # with an interactive logon session.
+        '0x80073D19' { $reason += '; sign in to this account once at the console or over RDP, then re-run' }
     }
     return $reason
 }
@@ -562,8 +724,8 @@ function Install-X86UwpRuntime {
     $label = 'UWP C++ runtime, x86 (for EarTrumpet)'
     if (Test-X86UwpRuntime) { Add-Result ok $label; return }
     # --force: winget already counts the x64 build as this package installed.
-    $code = RunRetry @('winget', 'install', '--id', 'Microsoft.VCLibs.14', '--exact', '--source', 'winget',
-        '--architecture', 'x86', '--force', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity')
+    $code = RunRetry (@('winget', 'install', '--id', 'Microsoft.VCLibs.14', '--exact', '--source', 'winget',
+        '--architecture', 'x86', '--force', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity') + $script:WingetModeArgs)
     if ($DryRun) { Add-Result changed $label 'dry run'; return }
     if (Test-X86UwpRuntime) { Add-Result changed $label }
     else { Add-Result failed $label "winget exited $code; EarTrumpet will fail to install without it" }
@@ -663,8 +825,8 @@ function Invoke-LayerPackages {
         # presence check above is what keeps this a no-upgrade install.
         # A hash mismatch (0x8A150011) stays until winget-pkgs updates the
         # manifest, so it is not retried.
-        $code = RunRetry @('winget', 'install', '--id', $id, '--exact', '--source', 'winget',
-            '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity') `
+        $code = RunRetry (@('winget', 'install', '--id', $id, '--exact', '--source', 'winget',
+            '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity') + $script:WingetModeArgs) `
             -FinalCodes @(0x8A150011)
         if ($DryRun) { Add-Result changed $name 'dry run'; $added++; continue }
         # Verify rather than trust the exit code: some installers report a
@@ -903,7 +1065,8 @@ function Invoke-HyperVSetup {
 # The components missing across all selected configs go to one unattended
 # `setup.exe modify --passive` run: a progress window, no questions. The
 # installer refuses --passive unless it starts elevated (exit 5007), so from a
-# non-elevated shell it is launched through one UAC prompt.
+# non-elevated shell it is launched through one UAC prompt. Headless it runs
+# --quiet instead, and a non-elevated headless run queues the command.
 
 # Ids of the workloads, component groups and components in a VS instance,
 # lower-cased; vswhere reads them from the instance state without launching the
@@ -996,8 +1159,16 @@ function Invoke-LayerVs {
     Write-Info "Adding $($missing.Count) Visual Studio components unattended: $($missing -join ', ')."
     $command = @($setup, 'modify', '--installPath', $installPath)
     foreach ($id in $missing) { $command += @('--add', $id) }
-    $command += @('--passive', '--norestart')
+    # --passive shows a progress window; headless there is nowhere to show it.
+    $uiMode = '--passive'
+    if ($script:HeadlessReason) { $uiMode = '--quiet' }
+    $command += @($uiMode, '--norestart')
     if ($script:Elevated) { $code = Run $command }
+    elseif ($script:HeadlessReason) {
+        # No desktop for the UAC prompt Start-Process -Verb RunAs would raise.
+        Add-ElevatedCommand 'Visual Studio workloads' (($command | ForEach-Object { Format-Arg $_ }) -join ' ')
+        return
+    }
     else {
         Write-Info "Asking for elevation once (UAC) for the Visual Studio Installer."
         $code = Invoke-ElevatedProcess $command

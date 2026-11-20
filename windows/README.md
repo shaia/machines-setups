@@ -9,16 +9,21 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 -Profile go,python
 
 `git` is the one thing the clone needs. Get it with
 `winget install --id Git.Git -e` on a box that has nothing, or let preflight
-install it if you extracted the repo from a zip.
+install it if you extracted the repo from a zip. No winget either, and no
+Microsoft Store to get it from? Preflight installs winget too; see
+[winget without the Store](#winget-without-the-store).
 
 See the [root README](../README.md) for the profiles and the reasoning behind
 them. This file covers what is specific to Windows.
 
 ## Layers
 
-Preflight always runs. It checks that winget is present and switches its
-downloader to WinINet, installs git if it is missing, and reports whether the
-shell is elevated and whether Developer Mode is on. Then six layers run:
+Preflight always runs. It installs winget if it is missing, without the
+Microsoft Store (see [winget without the Store](#winget-without-the-store)),
+switches winget's downloader to WinINet, installs git if it is missing, and reports whether the
+shell is elevated and whether Developer Mode is on. Over SSH it also gets
+winget working in that session (see [Over SSH](#over-ssh)). Then six layers
+run:
 
 | Layer | Does |
 | --- | --- |
@@ -190,6 +195,74 @@ install the Build Tools itself.
   `MSBuild\Current\Bin\amd64\MSBuild.exe`, as Visual Studio does. The 32-bit
   `Current\Bin\MSBuild.exe` makes the WDK pick its x86 API extractor, which
   fails, so ApiValidator stops the build.
+
+## winget without the Store
+
+winget comes inside App Installer, which the Microsoft Store delivers and
+updates. Windows Server, LTSC builds, machines whose Store is blocked by
+policy, and Windows Sandbox have no working Store. So when `winget` is
+missing, preflight installs it the way Microsoft's winget docs do for Windows
+Sandbox:
+
+1. It installs the NuGet package provider for the current user, which the
+   PowerShellGet 1.0 in Windows PowerShell needs to reach PSGallery.
+2. It installs the `Microsoft.WinGet.Client` module from PSGallery.
+3. It runs `Repair-WinGetPackageManager`. That downloads App Installer and its
+   framework packages from the
+   [winget-cli GitHub release](https://github.com/microsoft/winget-cli/releases)
+   and installs them. Windows checks their Microsoft signatures before
+   installing.
+
+These steps run in Windows PowerShell, even when the script runs under pwsh.
+Elevated, the run adds `-AllUsers`, which provisions winget for every account
+on the machine; otherwise winget is installed for the current user only.
+
+The module and the winget client release in lockstep under one version
+number. `$WingetClientVersion` at the top of `install.ps1` pins both, in line
+with the other pinned installers. To update, pick a newer stable winget-cli
+release that PSGallery also has as the module, and change that one value.
+`Repair-WinGetPackageManager` looks the release up through GitHub's API,
+which limits unauthenticated calls. If a run fails on that limit, set
+`GH_TOKEN` and re-run.
+
+Over SSH, preflight first tries registering an App Installer that Windows
+already has but has not registered for this account. That is quicker, and
+the bootstrap above runs only when it is not enough.
+
+## Over SSH
+
+The run is headless over OpenSSH (`SSH_CONNECTION` or `SSH_CLIENT` is set),
+over PowerShell remoting, in session 0 (where services and what they start
+run, with no desktop), or with `-Headless`. Preflight says so. What changes:
+
+- **Elevated or nothing.** A UAC prompt needs a desktop, and a headless
+  session has none. Most packages install machine-wide, so the packages layer
+  refuses to start from a session that is not elevated, rather than failing
+  package by package. Preflight reports `Running elevated` when the session
+  is. Machine-wide settings and the Visual Studio components are queued in the
+  summary as usual, and the Visual Studio command is never sent through
+  `Start-Process -Verb RunAs`.
+- **Installers run silently.** winget gets `--silent` and the Visual Studio
+  Installer `--quiet` instead of `--passive`, so nothing opens a window on a
+  desktop that is not there.
+- **winget is made to work in the session.** winget comes inside App
+  Installer, which Windows registers for an account at its first interactive
+  sign-in. When `winget` is missing, preflight registers App Installer by its
+  family name. Outside an interactive logon, winget also cannot install its own
+  package source, and every operation fails with `0x8A15000F`
+  ([winget-cli#6334](https://github.com/microsoft/winget-cli/issues/6334)).
+  Preflight checks the source with a `winget search`. If that fails, it
+  downloads `source2.msix` from winget's CDN, checks that it is validly signed
+  by Microsoft Corporation, and adds it with `Add-AppxPackage`. The file
+  changes as the index updates, so it is checked by signature, not by a
+  pinned hash. If the source still fails, preflight stops.
+- **A dropped connection stops the run.** Windows ends the session's processes
+  with it. Re-running is safe and skips what is done.
+
+Some MSIX packages refuse to install for an account that has never signed in
+interactively (`0x80073D19`); the summary says so. Sign in once at the
+console or over RDP, then re-run. GUI apps still install, ready for when you
+sit at the machine.
 
 ## Testing
 
